@@ -24,7 +24,7 @@ fn main() {
 
     // --- LIBRAW ---
     let libraw_dir = Path::new(&out_dir).join("LibRaw");
-    let libraw_url = "https://github.com/LibRaw/LibRaw/archive/refs/heads/master.tar.gz";
+    let libraw_url = "https://github.com/LibRaw/LibRaw/archive/refs/tags/0.21.4.tar.gz";
     let libraw_src_dir = libraw_dir.clone();
     let libraw_lib = libraw_src_dir.join("lib").join("libraw.a");
     let libraw_configure = libraw_src_dir.join("configure");
@@ -49,7 +49,7 @@ fn main() {
 
     // --- TINYEXIF ---
     let tinyexif_dir = Path::new(&out_dir).join("TinyEXIF");
-    let tinyexif_url = "https://github.com/cdcseacave/TinyEXIF/archive/refs/heads/master.tar.gz";
+    let tinyexif_url = "https://github.com/cdcseacave/TinyEXIF/archive/refs/tags/1.0.3.tar.gz";
     let tinyexif_src_dir = tinyexif_dir.join("TinyEXIF-master");
 
     if !tinyexif_src_dir.exists() {
@@ -59,7 +59,7 @@ fn main() {
 
     // --- TINYXML2 ---
     let tinyxml2_dir = Path::new(&out_dir).join("tinyxml2");
-    let tinyxml2_url = "https://github.com/leethomason/tinyxml2/archive/refs/heads/master.tar.gz";
+    let tinyxml2_url = "https://github.com/leethomason/tinyxml2/archive/refs/tags/11.0.0.tar.gz";
     let tinyxml2_src_dir = tinyxml2_dir.join("tinyxml2-master");
 
     if !tinyxml2_src_dir.exists() {

@@ -73,7 +73,7 @@ void populate_exif_from_tinyexif(const TinyEXIF::EXIFInfo& exif_info, ExifData& 
 }
 
 // Helper function to extract EXIF data from JPEG files
-void extract_jpeg_exif(const char* input_path, const std::vector<unsigned char>& input_data, ExifData& exif_data) {
+void extract_jpeg_exif(const std::vector<unsigned char>& input_data, ExifData& exif_data) {
     TinyEXIF::EXIFInfo original_exif_info;
     bool has_original_exif = (original_exif_info.parseFrom(input_data.data(), input_data.size()) == TinyEXIF::PARSE_SUCCESS);
     
@@ -190,7 +190,7 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
     
     if (is_jpeg(input_data.data(), size)) {
         // Handle JPEG files using TurboJPEG
-        extract_jpeg_exif(input_path, input_data, exif_data);
+        extract_jpeg_exif(input_data, exif_data);
         
         tjhandle decompress_handle = tjInitDecompress();
         if (!decompress_handle) {
