@@ -105,8 +105,6 @@ void extract_non_jpeg_exif(const std::vector<unsigned char>& input_data, ExifDat
 // Helper function to finalize EXIF data with common values
 void finalize_exif_data(ExifData& exif_data, int width, int height) {
     // Always update dimensions to match final output (like libraw_wrapper does)
-    exif_data.raw_width = width;
-    exif_data.raw_height = height;
     exif_data.output_width = width;
     exif_data.output_height = height;
     exif_data.colors = 3; // RGB JPEG
@@ -137,7 +135,7 @@ int save_rgb_as_jpeg(unsigned char* rgb_data, int width, int height, const char*
     unsigned char* jpeg_buffer = nullptr;
     unsigned long jpeg_size = 0;
     
-    if (tjCompress2(compress_handle, rgb_data, width, 0, height, TJPF_RGB, &jpeg_buffer, &jpeg_size, TJSAMP_444, 90, TJFLAG_FASTDCT) != 0) {
+    if (tjCompress2(compress_handle, rgb_data, width, 0, height, TJPF_RGB, &jpeg_buffer, &jpeg_size, TJSAMP_444, 75, TJFLAG_FASTDCT) != 0) {
         std::cerr << "Failed to compress JPEG: " << tjGetErrorStr() << std::endl;
         tjDestroy(compress_handle);
         return -1;
@@ -207,7 +205,13 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
             return -1;
         }
 
-        // Decompress to RGB
+        // Store the original resolution in EXIF data
+        exif_data.raw_width = width;
+        exif_data.raw_height = height;
+
+        // Decompress to RGB with quarter resolution
+        width /= 2; // Adjust width for quarter resolution
+        height /= 2; // Adjust height for quarter resolution
         size_t rgb_buffer_size = width * height * tjPixelSize[TJPF_RGB];
         rgb_data = new unsigned char[rgb_buffer_size];
 
@@ -222,16 +226,41 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
     } else {
         // For non-JPEG files (PNG, TIFF, etc.), use stb_image to decode
         extract_non_jpeg_exif(input_data, exif_data);
-        
+
         int channels;
         rgb_data = stbi_load(input_path, &width, &height, &channels, 3); // Force RGB (3 channels)
-        
+
         if (!rgb_data) {
             std::cerr << "Failed to decode image with stb_image: " << stbi_failure_reason() << std::endl;
             return -1;
         }
-        
-        std::cout << "Decoded image: " << width << "x" << height << " with " << channels << " channels" << std::endl;
+
+        // Store the original resolution in EXIF data
+        exif_data.raw_width = width;
+        exif_data.raw_height = height;
+
+        // Downscale the image by a factor of two using nearest neighbor
+        int new_width = width / 2;
+        int new_height = height / 2;
+        unsigned char* downscaled_data = new unsigned char[new_width * new_height * 3];
+
+        for (int y = 0; y < new_height; ++y) {
+            for (int x = 0; x < new_width; ++x) {
+                int src_index = ((y * 2) * width + (x * 2)) * 3;
+                int dst_index = (y * new_width + x) * 3;
+
+                // Copy RGB values
+                downscaled_data[dst_index] = rgb_data[src_index];
+                downscaled_data[dst_index + 1] = rgb_data[src_index + 1];
+                downscaled_data[dst_index + 2] = rgb_data[src_index + 2];
+            }
+        }
+
+        // Free the original RGB data and replace it with the downscaled data
+        stbi_image_free(rgb_data);
+        rgb_data = downscaled_data;
+        width = new_width;
+        height = new_height;
     }
 
     // Finalize EXIF data with common values
