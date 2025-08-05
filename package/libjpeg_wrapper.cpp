@@ -223,6 +223,59 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
         }
 
         tjDestroy(decompress_handle);
+
+        // Rotate the image according to EXIF orientation
+        TinyEXIF::EXIFInfo exif_info;
+        exif_info.parseFrom(input_data.data(), input_data.size());
+        int orientation = exif_info.Orientation;
+        if (orientation > 1) {
+            unsigned char* rotated_data = new unsigned char[rgb_buffer_size];
+            // Only handle the most common orientations (1=normal, 3=180, 6=90 CW, 8=90 CCW)
+            if (orientation == 3) {
+                // 180 degree rotation
+                for (int y = 0; y < height; ++y) {
+                    for (int x = 0; x < width; ++x) {
+                        int src_idx = (y * width + x) * 3;
+                        int dst_idx = ((height - 1 - y) * width + (width - 1 - x)) * 3;
+                        rotated_data[dst_idx] = rgb_data[src_idx];
+                        rotated_data[dst_idx + 1] = rgb_data[src_idx + 1];
+                        rotated_data[dst_idx + 2] = rgb_data[src_idx + 2];
+                    }
+                }
+            } else if (orientation == 6) {
+                // 90 degree CW rotation
+                for (int y = 0; y < height; ++y) {
+                    for (int x = 0; x < width; ++x) {
+                        int src_idx = (y * width + x) * 3;
+                        int dst_idx = (x * height + (height - 1 - y)) * 3;
+                        rotated_data[dst_idx] = rgb_data[src_idx];
+                        rotated_data[dst_idx + 1] = rgb_data[src_idx + 1];
+                        rotated_data[dst_idx + 2] = rgb_data[src_idx + 2];
+                    }
+                }
+                std::swap(width, height);
+            } else if (orientation == 8) {
+                // 90 degree CCW rotation
+                for (int y = 0; y < height; ++y) {
+                    for (int x = 0; x < width; ++x) {
+                        int src_idx = (y * width + x) * 3;
+                        int dst_idx = ((width - 1 - x) * height + y) * 3;
+                        rotated_data[dst_idx] = rgb_data[src_idx];
+                        rotated_data[dst_idx + 1] = rgb_data[src_idx + 1];
+                        rotated_data[dst_idx + 2] = rgb_data[src_idx + 2];
+                    }
+                }
+                std::swap(width, height);
+            } else {
+                // Orientation not handled, keep as is
+                delete[] rotated_data;
+                rotated_data = nullptr;
+            }
+            if (rotated_data) {
+                delete[] rgb_data;
+                rgb_data = rotated_data;
+            }
+        }
     } else {
         // For non-JPEG files (PNG, TIFF, etc.), use stb_image to decode
         extract_non_jpeg_exif(input_data, exif_data);
