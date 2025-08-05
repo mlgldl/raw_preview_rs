@@ -79,6 +79,15 @@ fn main() {
         .flag("-DUSE_ZLIB")
         .compile("raw_wrapper");
 
+    // Compile our C++ wrapper for libjpeg-turbo
+    cc::Build::new()
+        .cpp(true)
+        .file("libjpeg_wrapper.cpp")
+        .include(libjpeg_src_dir.display().to_string()) // Include path for libjpeg-turbo
+        .flag("-std=c++11")
+        .flag("-O3")
+        .compile("jpeg_wrapper");
+
     // Tell cargo to rerun this build script if these files change
     println!("cargo:rerun-if-changed=libraw_wrapper.cpp");
     println!("cargo:rerun-if-changed=libraw_wrapper.h");

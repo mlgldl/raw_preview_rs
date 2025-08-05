@@ -1,13 +1,11 @@
-mod raw_converter;
-
-use raw_converter::{convert_raw_to_jpeg, is_raw_file};
+use raw_preview_rs::{get_file_type, is_supported_file, process_any_image};
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
 fn main() {
-    println!("RAW to JPEG Converter using LibRaw and libjpeg-turbo");
-    println!("===================================");
+    println!("Universal Image Processor using LibRaw and libjpeg-turbo");
+    println!("=========================================================");
 
     let test_raws_dir = "../test_raws";
     let output_dir = "../output";
@@ -27,7 +25,7 @@ fn main() {
         }
     };
 
-    // Process each RAW file found
+    // Process each image file found
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -40,8 +38,8 @@ fn main() {
         let input_path = entry.path();
         let file_name = input_path.file_name().unwrap().to_string_lossy();
 
-        // Skip non-RAW files
-        if !is_raw_file(&file_name) {
+        // Skip non-image files
+        if !is_supported_file(&file_name) {
             continue;
         }
 
@@ -52,11 +50,17 @@ fn main() {
         let output_path = Path::new(output_dir).join(&output_filename);
         let output_path_str = output_path.to_string_lossy();
 
-        println!("Processing: {} -> {}", file_name, output_filename);
+        // Determine file type for display
+        let file_type = get_file_type(&file_name);
 
-        // Convert RAW to JPEG and measure time
+        println!(
+            "Processing {}: {} -> {}",
+            file_type, file_name, output_filename
+        );
+
+        // Process image file and measure time
         let start_time = Instant::now();
-        match convert_raw_to_jpeg(&input_path_str, &output_path_str) {
+        match process_any_image(&input_path_str, &output_path_str) {
             Ok(exif) => {
                 let duration = start_time.elapsed();
                 println!(
@@ -65,22 +69,24 @@ fn main() {
                     duration.as_secs_f64()
                 );
                 println!("     📷 Camera: {} {}", exif.camera_make, exif.camera_model);
-                if exif.iso_speed > 0 {
-                    println!("     📊 ISO: {}", exif.iso_speed);
+                if exif.has_exposure_info() {
+                    if exif.iso_speed > 0 {
+                        println!("     📊 ISO: {}", exif.iso_speed);
+                    }
+                    if exif.aperture > 0.0 {
+                        println!("     🔍 Aperture: {}", exif.formatted_aperture());
+                    }
+                    if exif.shutter > 0.0 {
+                        println!("     ⏱️  Shutter: {}", exif.formatted_shutter_speed());
+                    }
+                    if exif.focal_length > 0.0 {
+                        println!("     📏 Focal Length: {:.0}mm", exif.focal_length);
+                    }
                 }
-                if exif.aperture > 0.0 {
-                    println!("     🔍 Aperture: f/{:.1}", exif.aperture);
+                let dimensions = exif.formatted_dimensions();
+                if dimensions != "Unknown" {
+                    println!("     📐 Image Size: {}", dimensions);
                 }
-                if exif.shutter > 0.0 {
-                    println!("     ⏱️  Shutter: 1/{:.0}s", 1.0 / exif.shutter);
-                }
-                if exif.focal_length > 0.0 {
-                    println!("     📏 Focal Length: {:.0}mm", exif.focal_length);
-                }
-                println!(
-                    "     📐 Image Size: {}x{} (RAW: {}x{})",
-                    exif.output_width, exif.output_height, exif.raw_width, exif.raw_height
-                );
             }
             Err(e) => {
                 let duration = start_time.elapsed();
