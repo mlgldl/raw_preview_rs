@@ -98,7 +98,7 @@ fn main() {
     println!("===================================");
 
     let test_raws_dir = "../test_raws";
-    let output_dir = "./output";
+    let output_dir = "../output";
 
     if let Err(e) = fs::create_dir_all(output_dir) {
         eprintln!("Failed to create output directory: {}", e);
