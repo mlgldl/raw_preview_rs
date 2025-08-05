@@ -72,6 +72,96 @@ void populate_exif_from_tinyexif(const TinyEXIF::EXIFInfo& exif_info, ExifData& 
     exif_data.artist = nullptr;
 }
 
+// Helper function to extract EXIF data from JPEG files
+void extract_jpeg_exif(const char* input_path, const std::vector<unsigned char>& input_data, ExifData& exif_data) {
+    TinyEXIF::EXIFInfo original_exif_info;
+    bool has_original_exif = (original_exif_info.parseFrom(input_data.data(), input_data.size()) == TinyEXIF::PARSE_SUCCESS);
+    
+    if (has_original_exif) {
+        std::cout << "EXIF found in JPEG file" << std::endl;
+        populate_exif_from_tinyexif(original_exif_info, exif_data);
+    } else {
+        std::cout << "No EXIF data available, using basic info" << std::endl;
+        strncpy(exif_data.camera_make, "Unknown", 63);
+        exif_data.camera_make[63] = '\0';
+        strncpy(exif_data.camera_model, "JPEG Image", 63);
+        exif_data.camera_model[63] = '\0';
+    }
+}
+
+// Helper function to set default EXIF data for non-JPEG files
+void extract_non_jpeg_exif(const std::vector<unsigned char>& input_data, ExifData& exif_data) {
+    strncpy(exif_data.camera_make, "Unknown", 63);
+    exif_data.camera_make[63] = '\0';
+    
+    if (is_png(input_data.data(), input_data.size())) {
+        strncpy(exif_data.camera_model, "PNG->JPEG Conversion", 63);
+    } else {
+        strncpy(exif_data.camera_model, "Image->JPEG Conversion", 63);
+    }
+    exif_data.camera_model[63] = '\0';
+}
+
+// Helper function to finalize EXIF data with common values
+void finalize_exif_data(ExifData& exif_data, int width, int height) {
+    // Always update dimensions to match final output (like libraw_wrapper does)
+    exif_data.raw_width = width;
+    exif_data.raw_height = height;
+    exif_data.output_width = width;
+    exif_data.output_height = height;
+    exif_data.colors = 3; // RGB JPEG
+    exif_data.color_filter = 0; // No color filter for processed JPEG
+    
+    // Initialize other fields like libraw_wrapper
+    if (exif_data.iso_speed == 0) exif_data.iso_speed = 0;
+    if (exif_data.shutter == 0.0) exif_data.shutter = 0.0;
+    if (exif_data.aperture == 0.0) exif_data.aperture = 0.0;
+    if (exif_data.focal_length == 0.0) exif_data.focal_length = 0.0;
+    if (exif_data.max_aperture == 0.0) exif_data.max_aperture = 0.0;
+    if (exif_data.focal_length_35mm == 0) exif_data.focal_length_35mm = 0;
+    
+    // Initialize camera multipliers to neutral values
+    for (int i = 0; i < 4; i++) {
+        if (exif_data.cam_mul[i] == 0.0) exif_data.cam_mul[i] = 1.0;
+    }
+}
+
+// Helper function to save RGB data as JPEG
+int save_rgb_as_jpeg(unsigned char* rgb_data, int width, int height, const char* output_path) {
+    tjhandle compress_handle = tjInitCompress();
+    if (!compress_handle) {
+        std::cerr << "Failed to initialize TurboJPEG compressor" << std::endl;
+        return -1;
+    }
+
+    unsigned char* jpeg_buffer = nullptr;
+    unsigned long jpeg_size = 0;
+    
+    if (tjCompress2(compress_handle, rgb_data, width, 0, height, TJPF_RGB, &jpeg_buffer, &jpeg_size, TJSAMP_444, 90, TJFLAG_FASTDCT) != 0) {
+        std::cerr << "Failed to compress JPEG: " << tjGetErrorStr() << std::endl;
+        tjDestroy(compress_handle);
+        return -1;
+    }
+
+    // Write compressed JPEG to output file
+    std::ofstream output_file(output_path, std::ios::binary);
+    if (!output_file) {
+        std::cerr << "Failed to open output file: " << output_path << std::endl;
+        tjFree(jpeg_buffer);
+        tjDestroy(compress_handle);
+        return -1;
+    }
+
+    output_file.write(reinterpret_cast<char*>(jpeg_buffer), jpeg_size);
+    output_file.close();
+
+    // Cleanup
+    tjFree(jpeg_buffer);
+    tjDestroy(compress_handle);
+    
+    return 0;
+}
+
 int process_image_to_jpeg(const char* input_path, const char* output_path, ExifData& exif_data) {
     // Initialize EXIF data with defaults
     init_exif_data(exif_data);
@@ -96,254 +186,72 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
         return -1;
     }
 
-    // Detect file format and handle accordingly
+    // Decode image to RGB data
+    int width, height;
+    unsigned char* rgb_data = nullptr;
+    
     if (is_jpeg(input_data.data(), size)) {
         // Handle JPEG files using TurboJPEG
+        extract_jpeg_exif(input_path, input_data, exif_data);
+        
         tjhandle decompress_handle = tjInitDecompress();
         if (!decompress_handle) {
             std::cerr << "Failed to initialize TurboJPEG decompressor" << std::endl;
             return -1;
         }
 
-        int width, height, subsampling, colorspace;
+        int subsampling, colorspace;
         if (tjDecompressHeader3(decompress_handle, input_data.data(), size, &width, &height, &subsampling, &colorspace) != 0) {
             std::cerr << "Failed to read JPEG header: " << tjGetErrorStr() << std::endl;
             tjDestroy(decompress_handle);
             return -1;
         }
 
-        // Set basic image dimensions in EXIF data
-        exif_data.raw_width = width;
-        exif_data.raw_height = height;
-        exif_data.output_width = width;
-        exif_data.output_height = height;
-
         // Decompress to RGB
         size_t rgb_buffer_size = width * height * tjPixelSize[TJPF_RGB];
-        unsigned char* rgb_buffer = new unsigned char[rgb_buffer_size];
+        rgb_data = new unsigned char[rgb_buffer_size];
 
-        if (tjDecompress2(decompress_handle, input_data.data(), size, rgb_buffer, width, 0, height, TJPF_RGB, TJFLAG_FASTDCT) != 0) {
+        if (tjDecompress2(decompress_handle, input_data.data(), size, rgb_data, width, 0, height, TJPF_RGB, TJFLAG_FASTDCT) != 0) {
             std::cerr << "Failed to decompress JPEG: " << tjGetErrorStr() << std::endl;
-            delete[] rgb_buffer;
+            delete[] rgb_data;
             tjDestroy(decompress_handle);
             return -1;
         }
 
         tjDestroy(decompress_handle);
-
-        // Extract EXIF metadata from the original JPEG data first
-        TinyEXIF::EXIFInfo original_exif_info;
-        bool has_original_exif = false;
-        
-        // Try to parse EXIF from the JPEG file directly
-        std::ifstream exif_file(input_path, std::ios::binary);
-        if (exif_file) {
-            exif_file.seekg(0, std::ios::end);
-            size_t file_size = exif_file.tellg();
-            exif_file.seekg(0, std::ios::beg);
-            
-            std::vector<unsigned char> file_data(file_size);
-            exif_file.read(reinterpret_cast<char*>(file_data.data()), file_size);
-            exif_file.close();
-            
-            // Try parsing from JPEG file
-            has_original_exif = (original_exif_info.parseFrom(file_data.data(), file_size) == TinyEXIF::PARSE_SUCCESS);
-        }
-        
-        if (has_original_exif) {
-            std::cout << "EXIF Metadata found in original:" << std::endl;
-            std::cout << "Camera Make: " << original_exif_info.Make << std::endl;
-            std::cout << "Camera Model: " << original_exif_info.Model << std::endl;
-            std::cout << "Focal Length: " << original_exif_info.FocalLength << "mm" << std::endl;
-            std::cout << "ISO: " << original_exif_info.ISOSpeedRatings << std::endl;
-        } else {
-            std::cout << "No EXIF data found in original JPEG" << std::endl;
-        }
-
-        // Re-compress as JPEG and save to output path
-        tjhandle compress_handle = tjInitCompress();
-        if (!compress_handle) {
-            std::cerr << "Failed to initialize TurboJPEG compressor" << std::endl;
-            delete[] rgb_buffer;
-            return -1;
-        }
-
-        unsigned char* jpeg_buffer = nullptr;
-        unsigned long jpeg_size = 0;
-        
-        if (tjCompress2(compress_handle, rgb_buffer, width, 0, height, TJPF_RGB, &jpeg_buffer, &jpeg_size, TJSAMP_444, 90, TJFLAG_FASTDCT) != 0) {
-            std::cerr << "Failed to compress JPEG: " << tjGetErrorStr() << std::endl;
-            delete[] rgb_buffer;
-            tjDestroy(compress_handle);
-            return -1;
-        }
-
-        // Write compressed JPEG to output file
-        std::ofstream output_file(output_path, std::ios::binary);
-        if (!output_file) {
-            std::cerr << "Failed to open output file: " << output_path << std::endl;
-            delete[] rgb_buffer;
-            tjFree(jpeg_buffer);
-            tjDestroy(compress_handle);
-            return -1;
-        }
-
-        output_file.write(reinterpret_cast<char*>(jpeg_buffer), jpeg_size);
-        output_file.close();
-
-        // Extract EXIF data from the final output JPEG file to ensure accuracy
-        TinyEXIF::EXIFInfo final_exif_info;
-        bool has_final_exif = (final_exif_info.parseFrom(jpeg_buffer, jpeg_size) == TinyEXIF::PARSE_SUCCESS);
-        
-        if (has_final_exif) {
-            std::cout << "EXIF preserved in final output:" << std::endl;
-            populate_exif_from_tinyexif(final_exif_info, exif_data);
-        } else {
-            // If original had EXIF but final doesn't, preserve original EXIF but update dimensions
-            if (has_original_exif) {
-                std::cout << "Using original EXIF with updated dimensions" << std::endl;
-                populate_exif_from_tinyexif(original_exif_info, exif_data);
-            } else {
-                std::cout << "No EXIF data available, using basic info" << std::endl;
-                strncpy(exif_data.camera_make, "Unknown", 63);
-                exif_data.camera_make[63] = '\0';
-                strncpy(exif_data.camera_model, "JPEG Image", 63);
-                exif_data.camera_model[63] = '\0';
-            }
-        }
-
-        // Always update dimensions to match final output (like libraw_wrapper does)
-        exif_data.raw_width = width;
-        exif_data.raw_height = height;
-        exif_data.output_width = width;
-        exif_data.output_height = height;
-        exif_data.colors = 3; // RGB JPEG
-        exif_data.color_filter = 0; // No color filter for processed JPEG
-        
-        // Initialize other fields like libraw_wrapper
-        if (exif_data.iso_speed == 0) exif_data.iso_speed = 0;
-        if (exif_data.shutter == 0.0) exif_data.shutter = 0.0;
-        if (exif_data.aperture == 0.0) exif_data.aperture = 0.0;
-        if (exif_data.focal_length == 0.0) exif_data.focal_length = 0.0;
-        if (exif_data.max_aperture == 0.0) exif_data.max_aperture = 0.0;
-        if (exif_data.focal_length_35mm == 0) exif_data.focal_length_35mm = 0;
-        
-        // Initialize camera multipliers to neutral values
-        for (int i = 0; i < 4; i++) {
-            if (exif_data.cam_mul[i] == 0.0) exif_data.cam_mul[i] = 1.0;
-        }
-
-        // Cleanup
-        delete[] rgb_buffer;
-        tjFree(jpeg_buffer);
-        tjDestroy(compress_handle);
-        
-        return 0;
     } else {
-        // For non-JPEG files (PNG, TIFF, etc.), use stb_image to decode and convert to JPEG
-        int width, height, channels;
-        unsigned char* image_data = stbi_load(input_path, &width, &height, &channels, 3); // Force RGB (3 channels)
+        // For non-JPEG files (PNG, TIFF, etc.), use stb_image to decode
+        extract_non_jpeg_exif(input_data, exif_data);
         
-        if (!image_data) {
+        int channels;
+        rgb_data = stbi_load(input_path, &width, &height, &channels, 3); // Force RGB (3 channels)
+        
+        if (!rgb_data) {
             std::cerr << "Failed to decode image with stb_image: " << stbi_failure_reason() << std::endl;
             return -1;
         }
         
         std::cout << "Decoded image: " << width << "x" << height << " with " << channels << " channels" << std::endl;
-        
-        // Set basic image dimensions and info in EXIF data
-        exif_data.raw_width = width;
-        exif_data.raw_height = height;
-        exif_data.output_width = width;
-        exif_data.output_height = height;
-        exif_data.colors = 3; // RGB
-        
-        // Set basic camera info for non-JPEG files
-        strncpy(exif_data.camera_make, "Unknown", 63);
-        if (is_png(input_data.data(), size)) {
-            strncpy(exif_data.camera_model, "PNG Image", 63);
-        } else {
-            strncpy(exif_data.camera_model, "Image File", 63);
-        }
-        
-        // Compress the RGB data to JPEG using TurboJPEG
-        tjhandle compress_handle = tjInitCompress();
-        if (!compress_handle) {
-            std::cerr << "Failed to initialize TurboJPEG compressor" << std::endl;
-            stbi_image_free(image_data);
-            return -1;
-        }
-
-        unsigned char* jpeg_buffer = nullptr;
-        unsigned long jpeg_size = 0;
-        
-        if (tjCompress2(compress_handle, image_data, width, 0, height, TJPF_RGB, &jpeg_buffer, &jpeg_size, TJSAMP_444, 90, TJFLAG_FASTDCT) != 0) {
-            std::cerr << "Failed to compress to JPEG: " << tjGetErrorStr() << std::endl;
-            stbi_image_free(image_data);
-            tjDestroy(compress_handle);
-            return -1;
-        }
-
-        // Write compressed JPEG to output file
-        std::ofstream output_file(output_path, std::ios::binary);
-        if (!output_file) {
-            std::cerr << "Failed to open output file: " << output_path << std::endl;
-            stbi_image_free(image_data);
-            tjFree(jpeg_buffer);
-            tjDestroy(compress_handle);
-            return -1;
-        }
-
-        output_file.write(reinterpret_cast<char*>(jpeg_buffer), jpeg_size);
-        output_file.close();
-
-        // Try to extract EXIF from the final output JPEG (though unlikely for converted files)
-        TinyEXIF::EXIFInfo final_exif_info;
-        if (final_exif_info.parseFromEXIFSegment(jpeg_buffer, jpeg_size) == TinyEXIF::PARSE_SUCCESS) {
-            std::cout << "EXIF found in final JPEG output" << std::endl;
-            populate_exif_from_tinyexif(final_exif_info, exif_data);
-        } else {
-            // Set metadata based on the final converted image properties (like libraw_wrapper)
-            std::cout << "Setting metadata based on converted image properties" << std::endl;
-            strncpy(exif_data.camera_make, "Unknown", 63);
-            exif_data.camera_make[63] = '\0';
-            if (is_png(input_data.data(), size)) {
-                strncpy(exif_data.camera_model, "PNG->JPEG Conversion", 63);
-            } else {
-                strncpy(exif_data.camera_model, "Image->JPEG Conversion", 63);
-            }
-            exif_data.camera_model[63] = '\0';
-        }
-
-        // Always update dimensions to match final output (like libraw_wrapper does)
-        exif_data.raw_width = width;
-        exif_data.raw_height = height;
-        exif_data.output_width = width;
-        exif_data.output_height = height;
-        exif_data.colors = 3; // RGB JPEG
-        exif_data.color_filter = 0; // No color filter for processed JPEG
-        
-        // Initialize other fields like libraw_wrapper
-        if (exif_data.iso_speed == 0) exif_data.iso_speed = 0;
-        if (exif_data.shutter == 0.0) exif_data.shutter = 0.0;
-        if (exif_data.aperture == 0.0) exif_data.aperture = 0.0;
-        if (exif_data.focal_length == 0.0) exif_data.focal_length = 0.0;
-        if (exif_data.max_aperture == 0.0) exif_data.max_aperture = 0.0;
-        if (exif_data.focal_length_35mm == 0) exif_data.focal_length_35mm = 0;
-        
-        // Initialize camera multipliers to neutral values
-        for (int i = 0; i < 4; i++) {
-            if (exif_data.cam_mul[i] == 0.0) exif_data.cam_mul[i] = 1.0;
-        }
-
-        // Cleanup
-        stbi_image_free(image_data);
-        tjFree(jpeg_buffer);
-        tjDestroy(compress_handle);
-        
-        std::cout << "Successfully converted to JPEG: " << width << "x" << height << std::endl;
-        return 0;
     }
+
+    // Finalize EXIF data with common values
+    finalize_exif_data(exif_data, width, height);
+
+    // Save RGB data as JPEG
+    int result = save_rgb_as_jpeg(rgb_data, width, height, output_path);
+    
+    // Cleanup RGB data
+    if (is_jpeg(input_data.data(), size)) {
+        delete[] rgb_data;
+    } else {
+        stbi_image_free(rgb_data);
+    }
+    
+    if (result == 0) {
+        std::cout << "Successfully converted to JPEG: " << width << "x" << height << std::endl;
+    }
+    
+    return result;
 }
 
 void free_buffer(unsigned char* buffer) {
