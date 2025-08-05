@@ -145,6 +145,37 @@ int process_raw_to_jpeg(const char* input_path, const char* output_path, ExifDat
             return RW_ERROR_PROCESS;
         }
 
+        // Extract EXIF data from the processed image
+        // Note: camera make/model are char arrays in LibRaw, not pointers
+        strncpy((char*)exif_data.camera_make, processor->imgdata.idata.make, 63);
+        ((char*)exif_data.camera_make)[63] = '\0';
+        strncpy((char*)exif_data.camera_model, processor->imgdata.idata.model, 63);
+        ((char*)exif_data.camera_model)[63] = '\0';
+        
+        exif_data.software = processor->imgdata.idata.software;
+        exif_data.iso_speed = static_cast<int>(processor->imgdata.other.iso_speed);
+        exif_data.shutter = processor->imgdata.other.shutter;
+        exif_data.aperture = processor->imgdata.other.aperture;
+        exif_data.focal_length = processor->imgdata.other.focal_len;
+        exif_data.raw_width = processor->imgdata.sizes.raw_width;
+        exif_data.raw_height = processor->imgdata.sizes.raw_height;
+        exif_data.output_width = processor->imgdata.sizes.width;
+        exif_data.output_height = processor->imgdata.sizes.height;
+        exif_data.colors = processor->imgdata.idata.colors;
+        exif_data.color_filter = static_cast<int>(processor->imgdata.idata.filters);
+        
+        // Copy camera multipliers
+        for (int i = 0; i < 4; i++) {
+            exif_data.cam_mul[i] = processor->imgdata.color.cam_mul[i];
+        }
+        
+        exif_data.date_taken = processor->imgdata.other.desc;
+        exif_data.lens = processor->imgdata.lens.Lens;
+        exif_data.max_aperture = processor->imgdata.lens.EXIF_MaxAp;
+        exif_data.focal_length_35mm = processor->imgdata.lens.FocalLengthIn35mmFormat;
+        exif_data.description = processor->imgdata.other.desc;
+        exif_data.artist = processor->imgdata.other.artist;
+
         // Generate processed image data in memory
         libraw_processed_image_t* image = processor->dcraw_make_mem_image();
         if (!image) {

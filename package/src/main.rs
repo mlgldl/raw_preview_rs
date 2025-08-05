@@ -57,12 +57,29 @@ fn main() {
         // Convert RAW to JPEG and measure time
         let start_time = Instant::now();
         match convert_raw_to_jpeg(&input_path_str, &output_path_str) {
-            Ok(()) => {
+            Ok(exif) => {
                 let duration = start_time.elapsed();
                 println!(
                     "  ✅ Success -> {} (took {:.2}s)",
                     output_filename,
                     duration.as_secs_f64()
+                );
+                println!("     📷 Camera: {} {}", exif.camera_make, exif.camera_model);
+                if exif.iso_speed > 0 {
+                    println!("     📊 ISO: {}", exif.iso_speed);
+                }
+                if exif.aperture > 0.0 {
+                    println!("     🔍 Aperture: f/{:.1}", exif.aperture);
+                }
+                if exif.shutter > 0.0 {
+                    println!("     ⏱️  Shutter: 1/{:.0}s", 1.0 / exif.shutter);
+                }
+                if exif.focal_length > 0.0 {
+                    println!("     📏 Focal Length: {:.0}mm", exif.focal_length);
+                }
+                println!(
+                    "     📐 Image Size: {}x{} (RAW: {}x{})",
+                    exif.output_width, exif.output_height, exif.raw_width, exif.raw_height
                 );
             }
             Err(e) => {

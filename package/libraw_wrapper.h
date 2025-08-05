@@ -17,8 +17,8 @@ extern "C" {
 #define RW_ERROR_UNKNOWN 5
 
 struct ExifData {
-    char* camera_make;
-    char* camera_model;
+    char camera_make[64];
+    char camera_model[64];
     char* software;
     int iso_speed;
     double shutter;
