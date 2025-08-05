@@ -7,68 +7,185 @@ use flate2;
 use reqwest;
 use tar;
 
+// Dependency configuration (reserved for future use)
+#[allow(dead_code)]
+struct Dependency {
+    name: &'static str,
+    url: &'static str,
+    extract_dir: &'static str,
+    target_dir: &'static str,
+}
+
+#[allow(dead_code)]
+const DEPENDENCIES: &[Dependency] = &[
+    Dependency {
+        name: "zlib",
+        url: "https://zlib.net/fossils/zlib-1.3.tar.gz",
+        extract_dir: "zlib-1.3",
+        target_dir: "zlib",
+    },
+    Dependency {
+        name: "LibRaw",
+        url: "https://github.com/LibRaw/LibRaw/archive/refs/tags/0.21.4.tar.gz",
+        extract_dir: "LibRaw-0.21.4",
+        target_dir: "LibRaw",
+    },
+    Dependency {
+        name: "libjpeg-turbo",
+        url: "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/2.1.5/libjpeg-turbo-2.1.5.tar.gz",
+        extract_dir: "libjpeg-turbo-2.1.5",
+        target_dir: "libjpeg-turbo",
+    },
+    Dependency {
+        name: "TinyEXIF",
+        url: "https://github.com/cdcseacave/TinyEXIF/archive/refs/tags/1.0.3.tar.gz",
+        extract_dir: "TinyEXIF-1.0.3",
+        target_dir: "TinyEXIF",
+    },
+    Dependency {
+        name: "TinyXML2",
+        url: "https://github.com/leethomason/tinyxml2/archive/refs/tags/11.0.0.tar.gz",
+        extract_dir: "tinyxml2-11.0.0",
+        target_dir: "tinyxml2",
+    },
+];
+
+struct BuildPaths {
+    zlib_src: String,
+    libraw_src: String,
+    libjpeg_src: String,
+    tinyexif_src: String,
+    tinyxml2_src: String,
+    tinyxml2_build: String,
+    stb_dir: String,
+}
+
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
 
+    // Check for required build tools
+    check_build_tools();
+
+    // Build all dependencies
+    let paths = build_all_dependencies(&out_dir);
+
+    // Configure linking
+    configure_linking(&paths);
+
+    // Compile C++ wrappers
+    compile_wrappers(&paths);
+
+    // Tell cargo to rerun this build script if these files change
+    println!("cargo:rerun-if-changed=libraw_wrapper.cpp");
+    println!("cargo:rerun-if-changed=libraw_wrapper.h");
+    println!("cargo:rerun-if-changed=libjpeg_wrapper.cpp");
+    println!("cargo:rerun-if-changed=libjpeg_wrapper.h");
+    println!("cargo:rerun-if-changed=build.rs");
+}
+
+fn check_build_tools() {
+    let required_tools = vec![
+        (
+            "cmake",
+            "CMake is required for building TinyEXIF and TinyXML2",
+        ),
+        ("make", "Make is required for building all dependencies"),
+    ];
+
+    for (tool, message) in required_tools {
+        if Command::new(tool).arg("--version").output().is_err() {
+            panic!("{} not found. {}", tool, message);
+        }
+    }
+
+    // Check for autotools (optional but recommended)
+    if Command::new("autoreconf")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        println!(
+            "cargo:warning=autoreconf not found. This may cause issues building LibRaw from source."
+        );
+        println!(
+            "cargo:warning=Consider installing autotools: brew install autoconf automake libtool"
+        );
+    }
+}
+
+fn build_all_dependencies(out_dir: &str) -> BuildPaths {
     // --- ZLIB ---
-    let zlib_dir = Path::new(&out_dir).join("zlib");
-    let zlib_url = "https://zlib.net/fossils/zlib-1.3.tar.gz";
+    let zlib_dir = Path::new(out_dir).join("zlib");
     let zlib_src_dir = zlib_dir.join("zlib-1.3");
     let zlib_lib = zlib_src_dir.join("libz.a");
 
     if !zlib_lib.exists() {
         println!("cargo:warning=Downloading and building zlib...");
-        download_and_extract_zlib(&zlib_dir, zlib_url);
+        download_and_extract_zlib(&zlib_dir, "https://zlib.net/fossils/zlib-1.3.tar.gz");
         build_zlib(&zlib_src_dir);
     }
 
     // --- LIBRAW ---
-    let libraw_dir = Path::new(&out_dir).join("LibRaw");
-    let libraw_url = "https://github.com/LibRaw/LibRaw/archive/refs/tags/0.21.4.tar.gz";
-    let libraw_src_dir = libraw_dir.clone();
-    let libraw_lib = libraw_src_dir.join("lib").join("libraw.a");
-    let libraw_configure = libraw_src_dir.join("configure");
+    let libraw_dir = Path::new(out_dir).join("LibRaw");
+    let libraw_lib = libraw_dir.join("lib").join("libraw.a");
+    let libraw_configure = libraw_dir.join("configure");
 
     if !libraw_lib.exists() || !libraw_configure.exists() {
         println!("cargo:warning=Downloading and building LibRaw...");
-        download_and_extract_libraw(&out_dir, libraw_url);
-        build_libraw_with_zlib(&libraw_src_dir, &zlib_src_dir);
+        download_and_extract_libraw(
+            out_dir,
+            "https://github.com/LibRaw/LibRaw/archive/refs/tags/0.21.4.tar.gz",
+        );
+        build_libraw_with_zlib(&libraw_dir, &zlib_src_dir);
     }
 
     // --- LIBJPEG-TURBO ---
-    let libjpeg_dir = Path::new(&out_dir).join("libjpeg-turbo");
-    let libjpeg_url = "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/2.1.5/libjpeg-turbo-2.1.5.tar.gz"; // Correct release tarball
-    let libjpeg_src_dir = libjpeg_dir.join("libjpeg-turbo-2.1.5"); // Adjusted for extracted folder name
+    let libjpeg_dir = Path::new(out_dir).join("libjpeg-turbo");
+    let libjpeg_src_dir = libjpeg_dir.join("libjpeg-turbo-2.1.5");
     let libjpeg_lib = libjpeg_src_dir.join("build").join("libjpeg.a");
 
     if !libjpeg_lib.exists() {
         println!("cargo:warning=Downloading and building libjpeg-turbo...");
-        download_and_extract_libjpeg(&libjpeg_dir, libjpeg_url);
+        download_and_extract_libjpeg(
+            &libjpeg_dir,
+            "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/2.1.5/libjpeg-turbo-2.1.5.tar.gz",
+        );
         build_libjpeg(&libjpeg_src_dir);
     }
 
     // --- TINYEXIF ---
-    let tinyexif_dir = Path::new(&out_dir).join("TinyEXIF");
-    let tinyexif_url = "https://github.com/cdcseacave/TinyEXIF/archive/refs/tags/1.0.3.tar.gz";
-    let tinyexif_src_dir = tinyexif_dir.join("TinyEXIF-master");
+    let tinyexif_dir = Path::new(out_dir).join("TinyEXIF");
+    let tinyexif_src_dir = tinyexif_dir.join("TinyEXIF-1.0.3");
 
     if !tinyexif_src_dir.exists() {
         println!("cargo:warning=Downloading and setting up TinyEXIF...");
-        download_and_extract_tinyexif(&tinyexif_dir, tinyexif_url);
+        download_and_extract_tinyexif(
+            &tinyexif_dir,
+            "https://github.com/cdcseacave/TinyEXIF/archive/refs/tags/1.0.3.tar.gz",
+        );
     }
 
     // --- TINYXML2 ---
-    let tinyxml2_dir = Path::new(&out_dir).join("tinyxml2");
-    let tinyxml2_url = "https://github.com/leethomason/tinyxml2/archive/refs/tags/11.0.0.tar.gz";
-    let tinyxml2_src_dir = tinyxml2_dir.join("tinyxml2-master");
+    let tinyxml2_dir = Path::new(out_dir).join("tinyxml2");
+    let tinyxml2_src_dir = tinyxml2_dir.join("tinyxml2-11.0.0");
 
     if !tinyxml2_src_dir.exists() {
         println!("cargo:warning=Downloading and setting up TinyXML2...");
-        download_and_extract_tinyxml2(&tinyxml2_dir, tinyxml2_url);
+        download_and_extract_tinyxml2(
+            &tinyxml2_dir,
+            "https://github.com/leethomason/tinyxml2/archive/refs/tags/11.0.0.tar.gz",
+        );
     }
 
+    // Build TinyXML2
+    let tinyxml2_build_dir = tinyxml2_src_dir.join("build");
+    build_tinyxml2(&tinyxml2_src_dir, &tinyxml2_build_dir);
+
+    // Build TinyEXIF
+    build_tinyexif(&tinyexif_src_dir, &tinyxml2_build_dir);
+
     // --- STB_IMAGE ---
-    let stb_dir = Path::new(&out_dir).join("stb");
+    let stb_dir = Path::new(out_dir).join("stb");
     let stb_image_header = stb_dir.join("stb_image.h");
 
     if !stb_image_header.exists() {
@@ -76,16 +193,73 @@ fn main() {
         download_stb_image(&stb_dir);
     }
 
-    // Correct the tinyxml2_DIR to point to the build directory where CMake configuration files are generated
-    let tinyxml2_build_dir = tinyxml2_src_dir.join("build");
-    fs::create_dir_all(&tinyxml2_build_dir).expect("Failed to create build directory for TinyXML2");
+    BuildPaths {
+        zlib_src: zlib_src_dir.display().to_string(),
+        libraw_src: libraw_dir.display().to_string(),
+        libjpeg_src: libjpeg_src_dir.display().to_string(),
+        tinyexif_src: tinyexif_src_dir.display().to_string(),
+        tinyxml2_src: tinyxml2_src_dir.display().to_string(),
+        tinyxml2_build: tinyxml2_build_dir.display().to_string(),
+        stb_dir: stb_dir.display().to_string(),
+    }
+}
+
+fn configure_linking(paths: &BuildPaths) {
+    // Tell cargo to look for static libraries
+    println!("cargo:rustc-link-search=native={}/lib", paths.libraw_src);
+    println!("cargo:rustc-link-search=native={}", paths.zlib_src);
+    println!("cargo:rustc-link-search=native={}/build", paths.libjpeg_src);
+    println!("cargo:rustc-link-search=native={}", paths.tinyexif_src);
+    println!("cargo:rustc-link-search=native={}", paths.tinyxml2_build);
+
+    // Link statically against libraries
+    println!("cargo:rustc-link-lib=static=raw");
+    println!("cargo:rustc-link-lib=static=z");
+    println!("cargo:rustc-link-lib=static=jpeg");
+    println!("cargo:rustc-link-lib=static=turbojpeg");
+    println!("cargo:rustc-link-lib=static=TinyEXIF");
+    println!("cargo:rustc-link-lib=static=tinyxml2");
+    println!("cargo:rustc-link-lib=m"); // math library
+    println!("cargo:rustc-link-lib=c++"); // C++ standard library (macOS)
+}
+
+fn compile_wrappers(paths: &BuildPaths) {
+    // Compile LibRaw wrapper
+    cc::Build::new()
+        .cpp(true)
+        .file("libraw_wrapper.cpp")
+        .include(&paths.libraw_src)
+        .include(&paths.zlib_src)
+        .include(&paths.libjpeg_src)
+        .flag("-std=c++11")
+        .flag("-O3")
+        .flag("-DLIBRAW_NOTHREADS")
+        .flag("-DUSE_ZLIB")
+        .compile("raw_wrapper");
+
+    // Compile libjpeg wrapper
+    cc::Build::new()
+        .cpp(true)
+        .file("libjpeg_wrapper.cpp")
+        .include(&paths.libjpeg_src)
+        .include(&paths.tinyexif_src)
+        .include(&paths.tinyxml2_src)
+        .include(&paths.stb_dir)
+        .file(format!("{}/TinyEXIF.cpp", paths.tinyexif_src))
+        .flag("-std=c++11")
+        .flag("-O3")
+        .compile("jpeg_wrapper");
+}
+
+fn build_tinyxml2(_src_dir: &Path, build_dir: &Path) {
+    fs::create_dir_all(build_dir).expect("Failed to create build directory for TinyXML2");
 
     let output = Command::new("cmake")
         .arg("..")
         .arg("-DBUILD_SHARED_LIBS=OFF")
         .arg("-DBUILD_STATIC_LIBS=ON")
         .arg("-DCMAKE_INSTALL_PREFIX=.")
-        .current_dir(&tinyxml2_build_dir)
+        .current_dir(build_dir)
         .output()
         .expect("Failed to configure TinyXML2");
     if !output.status.success() {
@@ -96,7 +270,7 @@ fn main() {
     }
 
     let output = Command::new("make")
-        .current_dir(&tinyxml2_build_dir)
+        .current_dir(build_dir)
         .output()
         .expect("Failed to build TinyXML2");
     if !output.status.success() {
@@ -106,10 +280,10 @@ fn main() {
         );
     }
 
-    // Install TinyXML2 to generate CMake configuration files
+    // Install TinyXML2
     let output = Command::new("make")
         .arg("install")
-        .current_dir(&tinyxml2_build_dir)
+        .current_dir(build_dir)
         .output()
         .expect("Failed to install TinyXML2");
     if !output.status.success() {
@@ -118,8 +292,9 @@ fn main() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
 
-    // Update tinyxml2_DIR to point to the installation directory
+fn build_tinyexif(src_dir: &Path, tinyxml2_build_dir: &Path) {
     let tinyxml2_install_dir = tinyxml2_build_dir.display().to_string();
 
     let output = Command::new("cmake")
@@ -128,7 +303,7 @@ fn main() {
         .arg("-DBUILD_STATIC_LIBS=ON")
         .arg("-DTINYEXIF_NO_XMP=OFF") // Enable XMP parsing
         .arg(format!("-DCMAKE_PREFIX_PATH={}", tinyxml2_install_dir))
-        .current_dir(&tinyexif_src_dir)
+        .current_dir(src_dir)
         .output()
         .expect("Failed to configure TinyEXIF");
     if !output.status.success() {
@@ -139,7 +314,7 @@ fn main() {
     }
 
     let output = Command::new("make")
-        .current_dir(&tinyexif_src_dir)
+        .current_dir(src_dir)
         .output()
         .expect("Failed to build TinyEXIF");
     if !output.status.success() {
@@ -148,72 +323,12 @@ fn main() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-
-    // Tell cargo to look for static libraries in LibRaw, zlib, libjpeg-turbo, TinyEXIF, and TinyXML2 lib directories
-    println!(
-        "cargo:rustc-link-search=native={}/lib",
-        libraw_src_dir.display()
-    );
-    println!("cargo:rustc-link-search=native={}", zlib_src_dir.display());
-    println!(
-        "cargo:rustc-link-search=native={}/build",
-        libjpeg_src_dir.display()
-    );
-    println!(
-        "cargo:rustc-link-search=native={}",
-        tinyexif_src_dir.display()
-    );
-    println!(
-        "cargo:rustc-link-search=native={}",
-        tinyxml2_build_dir.display()
-    );
-
-    // Link statically against libraw, zlib, libjpeg-turbo, TinyEXIF, and TinyXML2
-    println!("cargo:rustc-link-lib=static=raw");
-    println!("cargo:rustc-link-lib=static=z");
-    println!("cargo:rustc-link-lib=static=jpeg"); // Link to libjpeg-turbo
-    println!("cargo:rustc-link-lib=static=turbojpeg"); // Link to TurboJPEG library
-    println!("cargo:rustc-link-lib=static=TinyEXIF");
-    println!("cargo:rustc-link-lib=static=tinyxml2");
-    println!("cargo:rustc-link-lib=m"); // math library
-    println!("cargo:rustc-link-lib=c++"); // C++ standard library (macOS)
-
-    // Compile our C++ wrapper
-    cc::Build::new()
-        .cpp(true)
-        .file("libraw_wrapper.cpp")
-        .include(libraw_src_dir.display().to_string())
-        .include(zlib_src_dir.display().to_string())
-        .include(libjpeg_src_dir.display().to_string()) // Include path for libjpeg-turbo
-        .flag("-std=c++11")
-        .flag("-O3")
-        .flag("-DLIBRAW_NOTHREADS")
-        .flag("-DUSE_ZLIB")
-        .compile("raw_wrapper");
-
-    // Compile our C++ wrapper for libjpeg-turbo
-    cc::Build::new()
-        .cpp(true)
-        .file("libjpeg_wrapper.cpp")
-        .include(libjpeg_src_dir.display().to_string()) // Include path for libjpeg-turbo
-        .include(tinyexif_src_dir.display().to_string()) // Include path for TinyEXIF
-        .include(tinyxml2_src_dir.display().to_string()) // Include path for TinyXML2
-        .include(stb_dir.display().to_string()) // Include path for stb_image
-        .file(tinyexif_src_dir.join("TinyEXIF.cpp")) // Include TinyEXIF implementation
-        .flag("-std=c++11")
-        .flag("-O3")
-        .compile("jpeg_wrapper");
-
-    // Tell cargo to rerun this build script if these files change
-    println!("cargo:rerun-if-changed=libraw_wrapper.cpp");
-    println!("cargo:rerun-if-changed=libraw_wrapper.h");
-    println!("cargo:rerun-if-changed=build.rs");
 }
 
+// Download and extraction functions
 fn download_and_extract_zlib(out_dir: &Path, url: &str) {
     let zlib_extract_dir = out_dir.join("zlib-1.3");
 
-    // Remove existing directory if it exists to avoid conflicts
     if zlib_extract_dir.exists() {
         fs::remove_dir_all(&zlib_extract_dir).expect("Failed to remove existing zlib directory");
     }
@@ -240,7 +355,6 @@ fn download_and_extract_zlib(out_dir: &Path, url: &str) {
                 file.read_to_string(&mut contents)
                     .expect("Failed to read zutil.h");
             }
-            // Comment out the fdopen macro definition
             let patched = contents.replace(
                 "#        define fdopen(fd,mode) NULL /* No fdopen() */",
                 "// #        define fdopen(fd,mode) NULL /* No fdopen() */",
@@ -280,7 +394,6 @@ fn build_zlib(zlib_src_dir: &Path) {
 fn download_and_extract_libraw(out_dir: &str, url: &str) {
     let target_dir = Path::new(out_dir).join("LibRaw");
 
-    // Remove existing directory if it exists to avoid conflicts
     if target_dir.exists() {
         fs::remove_dir_all(&target_dir).expect("Failed to remove existing LibRaw directory");
     }
@@ -297,10 +410,19 @@ fn download_and_extract_libraw(out_dir: &str, url: &str) {
     let tar = flate2::read::GzDecoder::new(std::io::Cursor::new(response));
     let mut archive = tar::Archive::new(tar);
     archive.unpack(out_dir).expect("Failed to extract LibRaw");
-    // Rename LibRaw-master to LibRaw if needed
-    let extracted_dir = Path::new(out_dir).join("LibRaw-master");
-    if extracted_dir.exists() {
-        fs::rename(extracted_dir, target_dir).expect("Failed to rename LibRaw directory");
+
+    // Handle different extraction directory names
+    let possible_dirs = vec![
+        Path::new(out_dir).join("LibRaw-0.21.4"),
+        Path::new(out_dir).join("LibRaw-master"),
+        Path::new(out_dir).join("LibRaw"),
+    ];
+
+    for extracted_dir in possible_dirs {
+        if extracted_dir.exists() && extracted_dir != target_dir {
+            fs::rename(extracted_dir, &target_dir).expect("Failed to rename LibRaw directory");
+            break;
+        }
     }
 }
 
@@ -393,7 +515,6 @@ fn build_libraw_with_zlib(libraw_dir: &Path, zlib_src_dir: &Path) {
 fn download_and_extract_libjpeg(out_dir: &Path, url: &str) {
     let libjpeg_extract_dir = out_dir.join("libjpeg-turbo-2.1.5");
 
-    // Remove existing directory if it exists to avoid conflicts
     if libjpeg_extract_dir.exists() {
         fs::remove_dir_all(&libjpeg_extract_dir)
             .expect("Failed to remove existing libjpeg-turbo directory");
@@ -456,9 +577,8 @@ fn build_libjpeg(libjpeg_src_dir: &Path) {
 }
 
 fn download_and_extract_tinyexif(out_dir: &Path, url: &str) {
-    let tinyexif_extract_dir = out_dir.join("TinyEXIF-master");
+    let tinyexif_extract_dir = out_dir.join("TinyEXIF-1.0.3");
 
-    // Remove existing directory if it exists to avoid conflicts
     if tinyexif_extract_dir.exists() {
         fs::remove_dir_all(&tinyexif_extract_dir)
             .expect("Failed to remove existing TinyEXIF directory");
@@ -479,9 +599,8 @@ fn download_and_extract_tinyexif(out_dir: &Path, url: &str) {
 }
 
 fn download_and_extract_tinyxml2(out_dir: &Path, url: &str) {
-    let tinyxml2_extract_dir = out_dir.join("tinyxml2-master");
+    let tinyxml2_extract_dir = out_dir.join("tinyxml2-11.0.0");
 
-    // Remove existing directory if it exists to avoid conflicts
     if tinyxml2_extract_dir.exists() {
         fs::remove_dir_all(&tinyxml2_extract_dir)
             .expect("Failed to remove existing TinyXML2 directory");

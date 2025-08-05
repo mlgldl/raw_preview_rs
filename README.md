@@ -30,6 +30,21 @@ Or, if using the GitHub repository:
 raw_preview_rs = { git = "https://github.com/mlgldl/raw_preview_rs" }
 ```
 
+### First Build
+
+The first build will take longer (5-15 minutes) as it downloads and compiles all native dependencies. Subsequent builds will be much faster as dependencies are cached.
+
+```bash
+# Clean build (if needed)
+cargo clean
+
+# Build with full output
+cargo build --release
+
+# Or build and run tests
+cargo test
+```
+
 ## Usage
 
 ### Example: Processing a RAW File
@@ -92,18 +107,126 @@ match process_any_image("photo.jpg", "copy.jpg") {
 -   Bitmap: BMP
 -   WebP: WEBP
 
-## External Dependencies
+## Build Requirements
 
-This library relies on several external C and C++ dependencies to provide efficient image processing and metadata handling. Below is a list of these dependencies with links to their respective repositories:
+This library has several native dependencies that are automatically downloaded and built during compilation. To ensure a successful build, you need the following tools installed on your system:
 
--   **[TurboJPEG](https://github.com/libjpeg-turbo/libjpeg-turbo)**: Used for fast JPEG compression and decompression.
--   **[stb_image](https://github.com/nothings/stb)**: A lightweight library for decoding standard image formats like PNG, BMP, and JPEG.
--   **[TinyEXIF](https://github.com/cdcseacave/TinyEXIF)**: A small library for extracting EXIF metadata from JPEG files.
--   **[LibRaw](https://www.libraw.org/)**: A library for decoding RAW image formats from various camera manufacturers.
+### Required Build Tools
 
-All dependencies are statically linked, meaning they are bundled directly into the library during the build process. As a result, there is no need to install these dependencies separately on your system.
+#### All Platforms
 
-These dependencies are integrated into the library to ensure high performance and broad format support. Make sure to have the necessary build tools installed to compile these dependencies when building the library.
+-   **CMake** (version 3.10 or higher)
+
+    -   Used for building TinyEXIF and TinyXML2
+    -   Download from: https://cmake.org/download/
+
+-   **Make**
+    -   Used for building all dependencies
+    -   Usually pre-installed on Unix-like systems
+
+#### macOS
+
+```bash
+# Install Xcode Command Line Tools (includes make, clang, etc.)
+xcode-select --install
+
+# Install CMake using Homebrew
+brew install cmake
+
+# Install autotools (recommended for LibRaw)
+brew install autoconf automake libtool pkg-config
+```
+
+#### Ubuntu/Debian
+
+```bash
+# Install build essentials and CMake
+sudo apt update
+sudo apt install build-essential cmake
+
+# Install autotools (recommended for LibRaw)
+sudo apt install autoconf automake libtool pkg-config
+```
+
+#### CentOS/RHEL/Fedora
+
+```bash
+# Install build tools and CMake
+sudo yum groupinstall "Development Tools"
+sudo yum install cmake
+
+# Install autotools (recommended for LibRaw)
+sudo yum install autoconf automake libtool pkgconfig
+```
+
+#### Windows
+
+-   **Visual Studio** (2019 or later) with C++ build tools
+-   **CMake** - Download from https://cmake.org/download/
+-   **Git** (for downloading dependencies)
+
+Alternatively, use **vcpkg** or **Conan** to manage dependencies.
+
+### Optional Tools
+
+-   **autoconf**, **automake**, **libtool**: Recommended for building LibRaw from source
+    -   If these are not available, the build script will attempt to use pre-generated configure scripts
+    -   Without these tools, some LibRaw versions may fail to build
+
+### Automatic Dependency Management
+
+The following dependencies are automatically downloaded and built during compilation:
+
+1. **zlib 1.3** - Compression library
+2. **LibRaw 0.21.4** - RAW image processing
+3. **libjpeg-turbo 2.1.5** - JPEG compression/decompression
+4. **TinyEXIF 1.0.3** - EXIF metadata extraction
+5. **TinyXML2 11.0.0** - XML parsing for XMP metadata
+6. **stb_image** - Standard image format decoding
+
+All dependencies are statically linked into the final library, so end users don't need to install anything separately.
+
+### Build Troubleshooting
+
+If you encounter build issues:
+
+1. **Missing autotools**: Install autoconf, automake, and libtool
+2. **CMake not found**: Ensure CMake is in your PATH
+3. **Compiler errors**: Ensure you have a C++11 compatible compiler
+4. **Network issues**: The build downloads dependencies from the internet
+
+For detailed error messages, run:
+
+```bash
+RUST_BACKTRACE=1 cargo build
+```
+
+### Cross-compilation
+
+Cross-compilation is supported but requires the target platform's build tools. Ensure CMake and make are available for your target platform.
+
+## Dependencies
+
+This library automatically manages all its native dependencies through a custom build script. The following libraries are downloaded, compiled, and statically linked during the build process:
+
+| Dependency        | Version | Purpose                        | Source                                                   |
+| ----------------- | ------- | ------------------------------ | -------------------------------------------------------- |
+| **zlib**          | 1.3     | Compression library            | [zlib.net](https://zlib.net/)                            |
+| **LibRaw**        | 0.21.4  | RAW image processing           | [GitHub](https://github.com/LibRaw/LibRaw)               |
+| **libjpeg-turbo** | 2.1.5   | JPEG compression/decompression | [GitHub](https://github.com/libjpeg-turbo/libjpeg-turbo) |
+| **TinyEXIF**      | 1.0.3   | EXIF metadata extraction       | [GitHub](https://github.com/cdcseacave/TinyEXIF)         |
+| **TinyXML2**      | 11.0.0  | XML parsing for XMP metadata   | [GitHub](https://github.com/leethomason/tinyxml2)        |
+| **stb_image**     | latest  | Standard image format decoding | [GitHub](https://github.com/nothings/stb)                |
+
+### Dependency Management Features
+
+-   **Automatic Download**: All dependencies are downloaded from their official sources
+-   **Version Pinning**: Specific versions are used to ensure build reproducibility
+-   **Static Linking**: All libraries are statically linked for easy deployment
+-   **Caching**: Built dependencies are cached to speed up subsequent builds
+-   **Cross-platform**: Works on macOS, Linux, and Windows with appropriate build tools
+
+No manual dependency installation is required - just ensure you have the build tools listed above.
 
 ## License
 

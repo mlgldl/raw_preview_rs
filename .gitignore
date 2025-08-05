@@ -1,4 +1,4 @@
 package/target/
-package/*.lock
+package/Cargo.lock
 
 .groupedtimelineinclude
