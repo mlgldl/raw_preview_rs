@@ -1,7 +1,7 @@
 [package]
 name = "raw_preview_rs"
 version = "0.1.0"
-authors = ["mlgldl"]
+authors = ["mlgldl <mail@mlgldl.dev>"]
 description = "A Rust library for processing raw images to create fast previews and handling EXIF metadata."
 license = "GPL-3.0"
 repository = "https://github.com/mlgldl/raw_preview_rs"
