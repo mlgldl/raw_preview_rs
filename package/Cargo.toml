@@ -7,7 +7,7 @@ license = "GPL-3.0"
 repository = "https://github.com/mlgldl/raw_preview_rs"
 readme = "../README.md"
 keywords = ["image-processing", "raw", "jpeg", "exif"]
-categories = ["image-processing", "file-format"]
+categories = ["Multimedia"]
 edition = "2024"
 
 [dependencies]
