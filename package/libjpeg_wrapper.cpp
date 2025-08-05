@@ -46,23 +46,30 @@ void init_exif_data(ExifData& exif_data) {
     exif_data.artist = nullptr;
 }
 
-// Helper function to populate ExifData from TinyEXIF
+// Helper function to populate ExifData from TinyEXIF (matching libraw_wrapper style)
 void populate_exif_from_tinyexif(const TinyEXIF::EXIFInfo& exif_info, ExifData& exif_data) {
-    // Copy camera make and model
+    // Copy camera make and model (like libraw_wrapper does)
     strncpy(exif_data.camera_make, exif_info.Make.c_str(), 63);
     exif_data.camera_make[63] = '\0';
     strncpy(exif_data.camera_model, exif_info.Model.c_str(), 63);
     exif_data.camera_model[63] = '\0';
     
-    // Set other EXIF fields
-    exif_data.iso_speed = exif_info.ISOSpeedRatings;
-    exif_data.shutter = (exif_info.ExposureTime > 0) ? (1.0 / exif_info.ExposureTime) : 0.0;
+    // Set EXIF fields (matching libraw_wrapper extraction pattern)
+    exif_data.iso_speed = static_cast<int>(exif_info.ISOSpeedRatings);
+    exif_data.shutter = exif_info.ExposureTime;
     exif_data.aperture = exif_info.FNumber;
     exif_data.focal_length = exif_info.FocalLength;
-    // Note: TinyEXIF may not have all fields, using available ones
+    exif_data.max_aperture = 0.0; // TinyEXIF doesn't have MaxApertureValue field
+    exif_data.focal_length_35mm = 0; // TinyEXIF doesn't have FocalLengthIn35mm field
     
-    // Software is typically stored as a string, we'll need to manage memory carefully
-    // For now, we'll leave it as nullptr to avoid memory management issues
+    // Note: Software, date_taken, lens, description, artist are typically stored as strings
+    // For now, we'll leave them as nullptr to avoid memory management issues
+    // This matches the pattern used in libraw_wrapper where these are pointer fields
+    exif_data.software = nullptr;
+    exif_data.date_taken = nullptr;
+    exif_data.lens = nullptr;
+    exif_data.description = nullptr;
+    exif_data.artist = nullptr;
 }
 
 int process_image_to_jpeg(const char* input_path, const char* output_path, ExifData& exif_data) {
@@ -126,7 +133,22 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
 
         // Extract EXIF metadata from the original JPEG data first
         TinyEXIF::EXIFInfo original_exif_info;
-        bool has_original_exif = (original_exif_info.parseFromEXIFSegment(input_data.data(), size) == TinyEXIF::PARSE_SUCCESS);
+        bool has_original_exif = false;
+        
+        // Try to parse EXIF from the JPEG file directly
+        std::ifstream exif_file(input_path, std::ios::binary);
+        if (exif_file) {
+            exif_file.seekg(0, std::ios::end);
+            size_t file_size = exif_file.tellg();
+            exif_file.seekg(0, std::ios::beg);
+            
+            std::vector<unsigned char> file_data(file_size);
+            exif_file.read(reinterpret_cast<char*>(file_data.data()), file_size);
+            exif_file.close();
+            
+            // Try parsing from JPEG file
+            has_original_exif = (original_exif_info.parseFrom(file_data.data(), file_size) == TinyEXIF::PARSE_SUCCESS);
+        }
         
         if (has_original_exif) {
             std::cout << "EXIF Metadata found in original:" << std::endl;
@@ -134,6 +156,8 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
             std::cout << "Camera Model: " << original_exif_info.Model << std::endl;
             std::cout << "Focal Length: " << original_exif_info.FocalLength << "mm" << std::endl;
             std::cout << "ISO: " << original_exif_info.ISOSpeedRatings << std::endl;
+        } else {
+            std::cout << "No EXIF data found in original JPEG" << std::endl;
         }
 
         // Re-compress as JPEG and save to output path
@@ -169,7 +193,9 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
 
         // Extract EXIF data from the final output JPEG file to ensure accuracy
         TinyEXIF::EXIFInfo final_exif_info;
-        if (final_exif_info.parseFromEXIFSegment(jpeg_buffer, jpeg_size) == TinyEXIF::PARSE_SUCCESS) {
+        bool has_final_exif = (final_exif_info.parseFrom(jpeg_buffer, jpeg_size) == TinyEXIF::PARSE_SUCCESS);
+        
+        if (has_final_exif) {
             std::cout << "EXIF preserved in final output:" << std::endl;
             populate_exif_from_tinyexif(final_exif_info, exif_data);
         } else {
@@ -180,16 +206,32 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
             } else {
                 std::cout << "No EXIF data available, using basic info" << std::endl;
                 strncpy(exif_data.camera_make, "Unknown", 63);
+                exif_data.camera_make[63] = '\0';
                 strncpy(exif_data.camera_model, "JPEG Image", 63);
+                exif_data.camera_model[63] = '\0';
             }
         }
 
-        // Always update dimensions to match final output
-        exif_data.output_width = width;
-        exif_data.output_height = height;
+        // Always update dimensions to match final output (like libraw_wrapper does)
         exif_data.raw_width = width;
         exif_data.raw_height = height;
+        exif_data.output_width = width;
+        exif_data.output_height = height;
         exif_data.colors = 3; // RGB JPEG
+        exif_data.color_filter = 0; // No color filter for processed JPEG
+        
+        // Initialize other fields like libraw_wrapper
+        if (exif_data.iso_speed == 0) exif_data.iso_speed = 0;
+        if (exif_data.shutter == 0.0) exif_data.shutter = 0.0;
+        if (exif_data.aperture == 0.0) exif_data.aperture = 0.0;
+        if (exif_data.focal_length == 0.0) exif_data.focal_length = 0.0;
+        if (exif_data.max_aperture == 0.0) exif_data.max_aperture = 0.0;
+        if (exif_data.focal_length_35mm == 0) exif_data.focal_length_35mm = 0;
+        
+        // Initialize camera multipliers to neutral values
+        for (int i = 0; i < 4; i++) {
+            if (exif_data.cam_mul[i] == 0.0) exif_data.cam_mul[i] = 1.0;
+        }
 
         // Cleanup
         delete[] rgb_buffer;
@@ -261,22 +303,38 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
             std::cout << "EXIF found in final JPEG output" << std::endl;
             populate_exif_from_tinyexif(final_exif_info, exif_data);
         } else {
-            // Set metadata based on the final converted image properties
+            // Set metadata based on the final converted image properties (like libraw_wrapper)
             std::cout << "Setting metadata based on converted image properties" << std::endl;
             strncpy(exif_data.camera_make, "Unknown", 63);
+            exif_data.camera_make[63] = '\0';
             if (is_png(input_data.data(), size)) {
                 strncpy(exif_data.camera_model, "PNG->JPEG Conversion", 63);
             } else {
                 strncpy(exif_data.camera_model, "Image->JPEG Conversion", 63);
             }
+            exif_data.camera_model[63] = '\0';
         }
 
-        // Always update dimensions to match final output
-        exif_data.output_width = width;
-        exif_data.output_height = height;
+        // Always update dimensions to match final output (like libraw_wrapper does)
         exif_data.raw_width = width;
         exif_data.raw_height = height;
+        exif_data.output_width = width;
+        exif_data.output_height = height;
         exif_data.colors = 3; // RGB JPEG
+        exif_data.color_filter = 0; // No color filter for processed JPEG
+        
+        // Initialize other fields like libraw_wrapper
+        if (exif_data.iso_speed == 0) exif_data.iso_speed = 0;
+        if (exif_data.shutter == 0.0) exif_data.shutter = 0.0;
+        if (exif_data.aperture == 0.0) exif_data.aperture = 0.0;
+        if (exif_data.focal_length == 0.0) exif_data.focal_length = 0.0;
+        if (exif_data.max_aperture == 0.0) exif_data.max_aperture = 0.0;
+        if (exif_data.focal_length_35mm == 0) exif_data.focal_length_35mm = 0;
+        
+        // Initialize camera multipliers to neutral values
+        for (int i = 0; i < 4; i++) {
+            if (exif_data.cam_mul[i] == 0.0) exif_data.cam_mul[i] = 1.0;
+        }
 
         // Cleanup
         stbi_image_free(image_data);
