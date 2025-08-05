@@ -1,5 +1,4 @@
 package/target/
-test_raws/
-output/
+package/*.lock
 
 .groupedtimelineinclude

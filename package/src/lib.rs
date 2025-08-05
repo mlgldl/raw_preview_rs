@@ -31,7 +31,7 @@ pub mod raw_processor;
 // Re-export the main public API
 pub use exif_data::ExifInfo;
 pub use file_detector::{get_file_type, is_image_file, is_raw_file, is_supported_file};
-pub use image_processor::{process_any_standard_image, process_image_file};
+pub use image_processor::process_image_file;
 pub use raw_processor::convert_raw_to_jpeg;
 
 use std::path::Path;

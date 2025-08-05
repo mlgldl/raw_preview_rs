@@ -113,24 +113,6 @@ pub fn process_image_file(input_path: &str, output_path: &str) -> Result<ExifInf
     Ok(exif_info)
 }
 
-/// Processes any supported image file (JPEG, PNG, TIFF, etc.) with appropriate handling
-///
-/// This is a convenience function that automatically detects the image type
-/// and applies the appropriate processing method. All image types now go through
-/// the same unified processing pipeline.
-///
-/// # Arguments
-/// * `input_path` - Path to the input image file
-/// * `output_path` - Path where the output will be saved
-///
-/// # Returns
-/// * `Ok(ExifInfo)` with extracted/generated metadata on success
-/// * `Err(String)` with error message on failure
-pub fn process_any_standard_image(input_path: &str, output_path: &str) -> Result<ExifInfo, String> {
-    // All image types (JPEG, PNG, TIFF, etc.) now use the same processing pipeline
-    process_image_file(input_path, output_path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
