@@ -3,7 +3,7 @@ name = "raw_preview_rs"
 version = "0.1.0"
 authors = ["mlgldl"]
 description = "A Rust library for processing raw images to create fast previews and handling EXIF metadata."
-license = "MIT"
+license = "GPL-3.0"
 repository = "https://github.com/mlgldl/raw_preview_rs"
 readme = "README.mdkeywords = ["image-processing", "raw", "jpeg", "exif"]
 categories = ["image-processing", "file-format"]
