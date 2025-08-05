@@ -124,16 +124,22 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
 
         tjDestroy(decompress_handle);
 
-        // Extract EXIF metadata from the original JPEG data first
-        TinyEXIF::EXIFInfo original_exif_info;
-        bool has_original_exif = (original_exif_info.parseFromEXIFSegment(input_data.data(), size) == TinyEXIF::PARSE_SUCCESS);
-        
-        if (has_original_exif) {
-            std::cout << "EXIF Metadata found in original:" << std::endl;
-            std::cout << "Camera Make: " << original_exif_info.Make << std::endl;
-            std::cout << "Camera Model: " << original_exif_info.Model << std::endl;
-            std::cout << "Focal Length: " << original_exif_info.FocalLength << "mm" << std::endl;
-            std::cout << "ISO: " << original_exif_info.ISOSpeedRatings << std::endl;
+        // Extract EXIF metadata from the original JPEG data
+        TinyEXIF::EXIFInfo exif_info;
+        if (exif_info.parseFromEXIFSegment(input_data.data(), size) == TinyEXIF::PARSE_SUCCESS) {
+            std::cout << "EXIF Metadata found:" << std::endl;
+            std::cout << "Camera Make: " << exif_info.Make << std::endl;
+            std::cout << "Camera Model: " << exif_info.Model << std::endl;
+            std::cout << "Focal Length: " << exif_info.FocalLength << "mm" << std::endl;
+            std::cout << "ISO: " << exif_info.ISOSpeedRatings << std::endl;
+            
+            // Populate our ExifData structure
+            populate_exif_from_tinyexif(exif_info, exif_data);
+        } else {
+            std::cout << "No EXIF metadata found in JPEG" << std::endl;
+            // Set basic camera info for JPEG files without EXIF
+            strncpy(exif_data.camera_make, "Unknown", 63);
+            strncpy(exif_data.camera_model, "JPEG Image", 63);
         }
 
         // Re-compress as JPEG and save to output path
@@ -166,30 +172,6 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
 
         output_file.write(reinterpret_cast<char*>(jpeg_buffer), jpeg_size);
         output_file.close();
-
-        // Extract EXIF data from the final output JPEG file to ensure accuracy
-        TinyEXIF::EXIFInfo final_exif_info;
-        if (final_exif_info.parseFromEXIFSegment(jpeg_buffer, jpeg_size) == TinyEXIF::PARSE_SUCCESS) {
-            std::cout << "EXIF preserved in final output:" << std::endl;
-            populate_exif_from_tinyexif(final_exif_info, exif_data);
-        } else {
-            // If original had EXIF but final doesn't, preserve original EXIF but update dimensions
-            if (has_original_exif) {
-                std::cout << "Using original EXIF with updated dimensions" << std::endl;
-                populate_exif_from_tinyexif(original_exif_info, exif_data);
-            } else {
-                std::cout << "No EXIF data available, using basic info" << std::endl;
-                strncpy(exif_data.camera_make, "Unknown", 63);
-                strncpy(exif_data.camera_model, "JPEG Image", 63);
-            }
-        }
-
-        // Always update dimensions to match final output
-        exif_data.output_width = width;
-        exif_data.output_height = height;
-        exif_data.raw_width = width;
-        exif_data.raw_height = height;
-        exif_data.colors = 3; // RGB JPEG
 
         // Cleanup
         delete[] rgb_buffer;
@@ -254,29 +236,6 @@ int process_image_to_jpeg(const char* input_path, const char* output_path, ExifD
 
         output_file.write(reinterpret_cast<char*>(jpeg_buffer), jpeg_size);
         output_file.close();
-
-        // Try to extract EXIF from the final output JPEG (though unlikely for converted files)
-        TinyEXIF::EXIFInfo final_exif_info;
-        if (final_exif_info.parseFromEXIFSegment(jpeg_buffer, jpeg_size) == TinyEXIF::PARSE_SUCCESS) {
-            std::cout << "EXIF found in final JPEG output" << std::endl;
-            populate_exif_from_tinyexif(final_exif_info, exif_data);
-        } else {
-            // Set metadata based on the final converted image properties
-            std::cout << "Setting metadata based on converted image properties" << std::endl;
-            strncpy(exif_data.camera_make, "Unknown", 63);
-            if (is_png(input_data.data(), size)) {
-                strncpy(exif_data.camera_model, "PNG->JPEG Conversion", 63);
-            } else {
-                strncpy(exif_data.camera_model, "Image->JPEG Conversion", 63);
-            }
-        }
-
-        // Always update dimensions to match final output
-        exif_data.output_width = width;
-        exif_data.output_height = height;
-        exif_data.raw_width = width;
-        exif_data.raw_height = height;
-        exif_data.colors = 3; // RGB JPEG
 
         // Cleanup
         stbi_image_free(image_data);

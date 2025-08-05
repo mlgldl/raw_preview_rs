@@ -47,7 +47,109 @@ fn main() {
         build_libjpeg(&libjpeg_src_dir);
     }
 
-    // Tell cargo to look for static libraries in LibRaw, zlib, and libjpeg-turbo lib directories
+    // --- TINYEXIF ---
+    let tinyexif_dir = Path::new(&out_dir).join("TinyEXIF");
+    let tinyexif_url = "https://github.com/cdcseacave/TinyEXIF/archive/refs/heads/master.tar.gz";
+    let tinyexif_src_dir = tinyexif_dir.join("TinyEXIF-master");
+
+    if !tinyexif_src_dir.exists() {
+        println!("cargo:warning=Downloading and setting up TinyEXIF...");
+        download_and_extract_tinyexif(&tinyexif_dir, tinyexif_url);
+    }
+
+    // --- TINYXML2 ---
+    let tinyxml2_dir = Path::new(&out_dir).join("tinyxml2");
+    let tinyxml2_url = "https://github.com/leethomason/tinyxml2/archive/refs/heads/master.tar.gz";
+    let tinyxml2_src_dir = tinyxml2_dir.join("tinyxml2-master");
+
+    if !tinyxml2_src_dir.exists() {
+        println!("cargo:warning=Downloading and setting up TinyXML2...");
+        download_and_extract_tinyxml2(&tinyxml2_dir, tinyxml2_url);
+    }
+
+    // --- STB_IMAGE ---
+    let stb_dir = Path::new(&out_dir).join("stb");
+    let stb_image_header = stb_dir.join("stb_image.h");
+
+    if !stb_image_header.exists() {
+        println!("cargo:warning=Downloading stb_image.h...");
+        download_stb_image(&stb_dir);
+    }
+
+    // Correct the tinyxml2_DIR to point to the build directory where CMake configuration files are generated
+    let tinyxml2_build_dir = tinyxml2_src_dir.join("build");
+    fs::create_dir_all(&tinyxml2_build_dir).expect("Failed to create build directory for TinyXML2");
+
+    let output = Command::new("cmake")
+        .arg("..")
+        .arg("-DBUILD_SHARED_LIBS=OFF")
+        .arg("-DBUILD_STATIC_LIBS=ON")
+        .arg("-DCMAKE_INSTALL_PREFIX=.")
+        .current_dir(&tinyxml2_build_dir)
+        .output()
+        .expect("Failed to configure TinyXML2");
+    if !output.status.success() {
+        panic!(
+            "Failed to configure TinyXML2: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let output = Command::new("make")
+        .current_dir(&tinyxml2_build_dir)
+        .output()
+        .expect("Failed to build TinyXML2");
+    if !output.status.success() {
+        panic!(
+            "Failed to build TinyXML2: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // Install TinyXML2 to generate CMake configuration files
+    let output = Command::new("make")
+        .arg("install")
+        .current_dir(&tinyxml2_build_dir)
+        .output()
+        .expect("Failed to install TinyXML2");
+    if !output.status.success() {
+        panic!(
+            "Failed to install TinyXML2: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // Update tinyxml2_DIR to point to the installation directory
+    let tinyxml2_install_dir = tinyxml2_build_dir.display().to_string();
+
+    let output = Command::new("cmake")
+        .arg(".")
+        .arg("-DBUILD_SHARED_LIBS=OFF")
+        .arg("-DBUILD_STATIC_LIBS=ON")
+        .arg("-DTINYEXIF_NO_XMP=OFF") // Enable XMP parsing
+        .arg(format!("-DCMAKE_PREFIX_PATH={}", tinyxml2_install_dir))
+        .current_dir(&tinyexif_src_dir)
+        .output()
+        .expect("Failed to configure TinyEXIF");
+    if !output.status.success() {
+        panic!(
+            "Failed to configure TinyEXIF: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let output = Command::new("make")
+        .current_dir(&tinyexif_src_dir)
+        .output()
+        .expect("Failed to build TinyEXIF");
+    if !output.status.success() {
+        panic!(
+            "Failed to build TinyEXIF: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // Tell cargo to look for static libraries in LibRaw, zlib, libjpeg-turbo, TinyEXIF, and TinyXML2 lib directories
     println!(
         "cargo:rustc-link-search=native={}/lib",
         libraw_src_dir.display()
@@ -57,12 +159,22 @@ fn main() {
         "cargo:rustc-link-search=native={}/build",
         libjpeg_src_dir.display()
     );
+    println!(
+        "cargo:rustc-link-search=native={}",
+        tinyexif_src_dir.display()
+    );
+    println!(
+        "cargo:rustc-link-search=native={}",
+        tinyxml2_build_dir.display()
+    );
 
-    // Link statically against libraw, zlib, and libjpeg-turbo
+    // Link statically against libraw, zlib, libjpeg-turbo, TinyEXIF, and TinyXML2
     println!("cargo:rustc-link-lib=static=raw");
     println!("cargo:rustc-link-lib=static=z");
     println!("cargo:rustc-link-lib=static=jpeg"); // Link to libjpeg-turbo
     println!("cargo:rustc-link-lib=static=turbojpeg"); // Link to TurboJPEG library
+    println!("cargo:rustc-link-lib=static=TinyEXIF");
+    println!("cargo:rustc-link-lib=static=tinyxml2");
     println!("cargo:rustc-link-lib=m"); // math library
     println!("cargo:rustc-link-lib=c++"); // C++ standard library (macOS)
 
@@ -84,6 +196,10 @@ fn main() {
         .cpp(true)
         .file("libjpeg_wrapper.cpp")
         .include(libjpeg_src_dir.display().to_string()) // Include path for libjpeg-turbo
+        .include(tinyexif_src_dir.display().to_string()) // Include path for TinyEXIF
+        .include(tinyxml2_src_dir.display().to_string()) // Include path for TinyXML2
+        .include(stb_dir.display().to_string()) // Include path for stb_image
+        .file(tinyexif_src_dir.join("TinyEXIF.cpp")) // Include TinyEXIF implementation
         .flag("-std=c++11")
         .flag("-O3")
         .compile("jpeg_wrapper");
@@ -337,4 +453,64 @@ fn build_libjpeg(libjpeg_src_dir: &Path) {
     let built_lib = build_dir.join("libjpeg.a");
     let dst_lib = lib_dir.join("libjpeg.a");
     fs::copy(&built_lib, &dst_lib).expect("Failed to copy libjpeg.a");
+}
+
+fn download_and_extract_tinyexif(out_dir: &Path, url: &str) {
+    let tinyexif_extract_dir = out_dir.join("TinyEXIF-master");
+
+    // Remove existing directory if it exists to avoid conflicts
+    if tinyexif_extract_dir.exists() {
+        fs::remove_dir_all(&tinyexif_extract_dir)
+            .expect("Failed to remove existing TinyEXIF directory");
+    }
+
+    fs::create_dir_all(out_dir).expect("Failed to create TinyEXIF dir");
+    let resp = reqwest::blocking::get(url).expect("Failed to download TinyEXIF");
+    if !resp.status().is_success() {
+        panic!("Failed to download TinyEXIF: HTTP {}", resp.status());
+    }
+    let response = resp
+        .bytes()
+        .expect("Failed to read TinyEXIF download")
+        .to_vec();
+    let tar = flate2::read::GzDecoder::new(std::io::Cursor::new(response));
+    let mut archive = tar::Archive::new(tar);
+    archive.unpack(out_dir).expect("Failed to extract TinyEXIF");
+}
+
+fn download_and_extract_tinyxml2(out_dir: &Path, url: &str) {
+    let tinyxml2_extract_dir = out_dir.join("tinyxml2-master");
+
+    // Remove existing directory if it exists to avoid conflicts
+    if tinyxml2_extract_dir.exists() {
+        fs::remove_dir_all(&tinyxml2_extract_dir)
+            .expect("Failed to remove existing TinyXML2 directory");
+    }
+
+    fs::create_dir_all(out_dir).expect("Failed to create TinyXML2 dir");
+    let resp = reqwest::blocking::get(url).expect("Failed to download TinyXML2");
+    if !resp.status().is_success() {
+        panic!("Failed to download TinyXML2: HTTP {}", resp.status());
+    }
+    let response = resp
+        .bytes()
+        .expect("Failed to read TinyXML2 download")
+        .to_vec();
+    let tar = flate2::read::GzDecoder::new(std::io::Cursor::new(response));
+    let mut archive = tar::Archive::new(tar);
+    archive.unpack(out_dir).expect("Failed to extract TinyXML2");
+}
+
+fn download_stb_image(stb_dir: &Path) {
+    fs::create_dir_all(stb_dir).expect("Failed to create stb dir");
+
+    let stb_image_url = "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h";
+    let resp = reqwest::blocking::get(stb_image_url).expect("Failed to download stb_image.h");
+    if !resp.status().is_success() {
+        panic!("Failed to download stb_image.h: HTTP {}", resp.status());
+    }
+
+    let content = resp.text().expect("Failed to read stb_image.h content");
+    let stb_image_path = stb_dir.join("stb_image.h");
+    fs::write(stb_image_path, content).expect("Failed to write stb_image.h");
 }

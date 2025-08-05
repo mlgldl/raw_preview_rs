@@ -29,7 +29,7 @@ pub mod image_processor;
 pub mod raw_processor;
 
 // Re-export the main public API
-pub use exif_data::{ExifData, ExifInfo};
+pub use exif_data::ExifInfo;
 pub use file_detector::{get_file_type, is_image_file, is_raw_file, is_supported_file};
 pub use image_processor::{process_any_standard_image, process_image_file, process_jpeg_file};
 pub use raw_processor::convert_raw_to_jpeg;
@@ -109,7 +109,53 @@ pub fn process_any_image(input_path: &str, output_path: &str) -> Result<ExifInfo
     if is_raw_file(filename) {
         convert_raw_to_jpeg(input_path, output_path)
     } else if is_image_file(filename) {
-        process_any_standard_image(input_path, output_path)
+        use std::ffi::CString;
+        use std::mem;
+        
+        // Use libjpeg_wrapper for non-RAW images
+        let c_input_path = CString::new(input_path).map_err(|_| "Invalid input path")?;
+        let c_output_path = CString::new(output_path).map_err(|_| "Invalid output path")?;
+        
+        let mut exif_data: exif_data::ExifData = unsafe { mem::zeroed() };
+        
+        let result = unsafe { 
+            process_image_to_jpeg(
+                c_input_path.as_ptr(), 
+                c_output_path.as_ptr(), 
+                &mut exif_data
+            ) 
+        };
+        
+        if result != 0 {
+            return Err("Failed to process image with libjpeg_wrapper".to_string());
+        }
+        
+        // Convert C ExifData to Rust ExifInfo
+        let camera_make = unsafe { 
+            std::ffi::CStr::from_ptr(exif_data.camera_make.as_ptr())
+                .to_string_lossy()
+                .to_string()
+        };
+        let camera_model = unsafe { 
+            std::ffi::CStr::from_ptr(exif_data.camera_model.as_ptr())
+                .to_string_lossy()
+                .to_string()
+        };
+        
+        Ok(ExifInfo {
+            camera_make,
+            camera_model,
+            iso_speed: exif_data.iso_speed,
+            shutter: exif_data.shutter,
+            aperture: exif_data.aperture,
+            focal_length: exif_data.focal_length,
+            raw_width: exif_data.raw_width,
+            raw_height: exif_data.raw_height,
+            output_width: exif_data.output_width,
+            output_height: exif_data.output_height,
+            colors: exif_data.colors,
+            ..Default::default()
+        })
     } else {
         Err(format!(
             "Unsupported file format: '{}'. Supported formats include RAW files (CR2, CR3, NEF, ARW, etc.) and image files (JPG, PNG, TIFF, etc.)",
@@ -167,7 +213,7 @@ pub fn get_file_info(input_path: &str) -> String {
 
     match get_file_type(filename) {
         "RAW" => format!("RAW file (will be processed with LibRaw)"),
-        "Image" => format!("Standard image file (will be processed with basic image handling)"),
+        "Image" => format!("Standard image file (will be processed with libjpeg_wrapper)"),
         _ => format!("Unsupported file format"),
     }
 }
@@ -195,19 +241,11 @@ mod tests {
 
 #[link(name = "jpeg_wrapper")]
 unsafe extern "C" {
-    pub fn decode_jpeg(
+    pub fn process_image_to_jpeg(
         input_path: *const libc::c_char,
-        output_buffer: *mut *mut u8,
-        info: *mut JpegInfo,
+        output_path: *const libc::c_char,
+        exif_data: *mut exif_data::ExifData,
     ) -> libc::c_int;
 
     pub fn free_buffer(buffer: *mut u8);
-}
-
-#[repr(C)]
-pub struct JpegInfo {
-    pub width: libc::c_int,
-    pub height: libc::c_int,
-    pub subsampling: libc::c_int,
-    pub colorspace: libc::c_int,
 }
