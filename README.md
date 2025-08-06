@@ -2,7 +2,6 @@
 
 [![Crates.io](https://img.shields.io/crates/v/raw_preview_rs)](https://crates.io/crates/raw_preview_rs)
 [![Documentation](https://docs.rs/raw_preview_rs/badge.svg)](https://docs.rs/raw_preview_rs)
-[![License](https://img.shields.io/crates/l/raw_preview_rs)](https://github.com/mlgldl/raw_preview_rs/blob/master/LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
 
 A Rust library designed to quickly create preview JPEGs from RAW image files and extract comprehensive EXIF metadata. This library is optimized for speed and efficiency, making it ideal for applications that require fast image previews and the EXIF metadata.
