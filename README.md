@@ -8,6 +8,8 @@
 A Rust library designed to quickly create preview JPEGs from RAW image files and extract comprehensive EXIF metadata.\
 ‼️ This library is optimized for compatability, hence it requires an involved build process to statically link the C/C++ dependencies.
 
+This library/crate is in early development.
+
 ## Features
 
 -   **RAW Image Processing**: Supports 27+ RAW formats, including CR2, NEF, ARW, RAF, and more.

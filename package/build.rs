@@ -61,6 +61,12 @@ struct BuildPaths {
 }
 
 fn main() {
+    // Detect if we're building docs on docs.rs
+    if std::env::var("DOCS_RS").is_ok() {
+        println!("cargo:warning=Skipping C++ download on docs.rs");
+        return;
+    }
+
     let out_dir = env::var("OUT_DIR").unwrap();
 
     // Check for required build tools
