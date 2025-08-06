@@ -3,11 +3,22 @@
 /// This module handles processing of standard image formats,
 /// including EXIF extraction from all image files through the libjpeg wrapper.
 use crate::exif_data::{ExifData, ExifInfo};
-use crate::process_image_to_jpeg;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::Path;
 use std::ptr;
+
+// Foreign function interface to our C++ wrapper
+#[link(name = "jpeg_wrapper")]
+unsafe extern "C" {
+    pub fn process_image_to_jpeg(
+        input_path: *const libc::c_char,
+        output_path: *const libc::c_char,
+        exif_data: *mut ExifData,
+    ) -> libc::c_int;
+
+    pub fn free_buffer(buffer: *mut u8);
+}
 
 /// Helper function to safely convert C char arrays to Rust strings (same as raw_processor)
 fn safe_string_from_array(arr: &[c_char]) -> String {

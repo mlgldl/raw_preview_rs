@@ -193,14 +193,3 @@ mod tests {
         assert!(get_file_info("document.txt").contains("Unsupported"));
     }
 }
-
-#[link(name = "jpeg_wrapper")]
-unsafe extern "C" {
-    pub fn process_image_to_jpeg(
-        input_path: *const libc::c_char,
-        output_path: *const libc::c_char,
-        exif_data: *mut exif_data::ExifData,
-    ) -> libc::c_int;
-
-    pub fn free_buffer(buffer: *mut u8);
-}
