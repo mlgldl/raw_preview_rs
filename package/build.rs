@@ -251,80 +251,6 @@ fn compile_wrappers(paths: &BuildPaths) {
         .compile("jpeg_wrapper");
 }
 
-fn build_tinyxml2(_src_dir: &Path, build_dir: &Path) {
-    fs::create_dir_all(build_dir).expect("Failed to create build directory for TinyXML2");
-
-    let output = Command::new("cmake")
-        .arg("..")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .arg("-DBUILD_STATIC_LIBS=ON")
-        .arg("-DCMAKE_INSTALL_PREFIX=.")
-        .current_dir(build_dir)
-        .output()
-        .expect("Failed to configure TinyXML2");
-    if !output.status.success() {
-        panic!(
-            "Failed to configure TinyXML2: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let output = Command::new("make")
-        .current_dir(build_dir)
-        .output()
-        .expect("Failed to build TinyXML2");
-    if !output.status.success() {
-        panic!(
-            "Failed to build TinyXML2: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    // Install TinyXML2
-    let output = Command::new("make")
-        .arg("install")
-        .current_dir(build_dir)
-        .output()
-        .expect("Failed to install TinyXML2");
-    if !output.status.success() {
-        panic!(
-            "Failed to install TinyXML2: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-}
-
-fn build_tinyexif(src_dir: &Path, tinyxml2_build_dir: &Path) {
-    let tinyxml2_install_dir = tinyxml2_build_dir.display().to_string();
-
-    let output = Command::new("cmake")
-        .arg(".")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .arg("-DBUILD_STATIC_LIBS=ON")
-        .arg("-DTINYEXIF_NO_XMP=OFF") // Enable XMP parsing
-        .arg(format!("-DCMAKE_PREFIX_PATH={}", tinyxml2_install_dir))
-        .current_dir(src_dir)
-        .output()
-        .expect("Failed to configure TinyEXIF");
-    if !output.status.success() {
-        panic!(
-            "Failed to configure TinyEXIF: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let output = Command::new("make")
-        .current_dir(src_dir)
-        .output()
-        .expect("Failed to build TinyEXIF");
-    if !output.status.success() {
-        panic!(
-            "Failed to build TinyEXIF: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-}
-
 // Download and extraction functions
 fn download_and_extract_zlib(out_dir: &Path, url: &str) {
     let zlib_extract_dir = out_dir.join("zlib-1.3");
@@ -576,6 +502,71 @@ fn build_libjpeg(libjpeg_src_dir: &Path) {
     fs::copy(&built_lib, &dst_lib).expect("Failed to copy libjpeg.a");
 }
 
+fn download_and_extract_tinyxml2(out_dir: &Path, url: &str) {
+    let tinyxml2_extract_dir = out_dir.join("tinyxml2-11.0.0");
+
+    if tinyxml2_extract_dir.exists() {
+        fs::remove_dir_all(&tinyxml2_extract_dir)
+            .expect("Failed to remove existing TinyXML2 directory");
+    }
+
+    fs::create_dir_all(out_dir).expect("Failed to create TinyXML2 dir");
+    let resp = reqwest::blocking::get(url).expect("Failed to download TinyXML2");
+    if !resp.status().is_success() {
+        panic!("Failed to download TinyXML2: HTTP {}", resp.status());
+    }
+    let response = resp
+        .bytes()
+        .expect("Failed to read TinyXML2 download")
+        .to_vec();
+    let tar = flate2::read::GzDecoder::new(std::io::Cursor::new(response));
+    let mut archive = tar::Archive::new(tar);
+    archive.unpack(out_dir).expect("Failed to extract TinyXML2");
+}
+
+fn build_tinyxml2(_src_dir: &Path, build_dir: &Path) {
+    fs::create_dir_all(build_dir).expect("Failed to create build directory for TinyXML2");
+
+    let output = Command::new("cmake")
+        .arg("..")
+        .arg("-DBUILD_SHARED_LIBS=OFF")
+        .arg("-DBUILD_STATIC_LIBS=ON")
+        .arg("-DCMAKE_INSTALL_PREFIX=.")
+        .current_dir(build_dir)
+        .output()
+        .expect("Failed to configure TinyXML2");
+    if !output.status.success() {
+        panic!(
+            "Failed to configure TinyXML2: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let output = Command::new("make")
+        .current_dir(build_dir)
+        .output()
+        .expect("Failed to build TinyXML2");
+    if !output.status.success() {
+        panic!(
+            "Failed to build TinyXML2: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // Install TinyXML2
+    let output = Command::new("make")
+        .arg("install")
+        .current_dir(build_dir)
+        .output()
+        .expect("Failed to install TinyXML2");
+    if !output.status.success() {
+        panic!(
+            "Failed to install TinyXML2: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 fn download_and_extract_tinyexif(out_dir: &Path, url: &str) {
     let tinyexif_extract_dir = out_dir.join("TinyEXIF-1.0.3");
 
@@ -598,26 +589,35 @@ fn download_and_extract_tinyexif(out_dir: &Path, url: &str) {
     archive.unpack(out_dir).expect("Failed to extract TinyEXIF");
 }
 
-fn download_and_extract_tinyxml2(out_dir: &Path, url: &str) {
-    let tinyxml2_extract_dir = out_dir.join("tinyxml2-11.0.0");
+fn build_tinyexif(src_dir: &Path, tinyxml2_build_dir: &Path) {
+    let tinyxml2_install_dir = tinyxml2_build_dir.display().to_string();
 
-    if tinyxml2_extract_dir.exists() {
-        fs::remove_dir_all(&tinyxml2_extract_dir)
-            .expect("Failed to remove existing TinyXML2 directory");
+    let output = Command::new("cmake")
+        .arg(".")
+        .arg("-DBUILD_SHARED_LIBS=OFF")
+        .arg("-DBUILD_STATIC_LIBS=ON")
+        .arg("-DTINYEXIF_NO_XMP=OFF") // Enable XMP parsing
+        .arg(format!("-DCMAKE_PREFIX_PATH={}", tinyxml2_install_dir))
+        .current_dir(src_dir)
+        .output()
+        .expect("Failed to configure TinyEXIF");
+    if !output.status.success() {
+        panic!(
+            "Failed to configure TinyEXIF: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
-    fs::create_dir_all(out_dir).expect("Failed to create TinyXML2 dir");
-    let resp = reqwest::blocking::get(url).expect("Failed to download TinyXML2");
-    if !resp.status().is_success() {
-        panic!("Failed to download TinyXML2: HTTP {}", resp.status());
+    let output = Command::new("make")
+        .current_dir(src_dir)
+        .output()
+        .expect("Failed to build TinyEXIF");
+    if !output.status.success() {
+        panic!(
+            "Failed to build TinyEXIF: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
-    let response = resp
-        .bytes()
-        .expect("Failed to read TinyXML2 download")
-        .to_vec();
-    let tar = flate2::read::GzDecoder::new(std::io::Cursor::new(response));
-    let mut archive = tar::Archive::new(tar);
-    archive.unpack(out_dir).expect("Failed to extract TinyXML2");
 }
 
 fn download_stb_image(stb_dir: &Path) {
