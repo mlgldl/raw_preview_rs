@@ -6,7 +6,7 @@
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
 
 A Rust library designed to quickly create preview JPEGs from RAW image files and extract comprehensive EXIF metadata.\
-‼️ This library is optimized for compatability, hence it requires an involved build process to statically link the C/C++ dependencies.
+‼️ This library is optimized for compatibility; hence, it comes with an involved build process to statically link the C/C++ dependencies, requiring several build tools.
 
 This library/crate is in early development.
 
@@ -23,19 +23,12 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-raw_preview_rs = "0.1.0"
-```
-
-Or, if using the GitHub repository:
-
-```toml
-[dependencies]
-raw_preview_rs = { git = "https://github.com/mlgldl/raw_preview_rs" }
+raw_preview_rs = "0.1.1"
 ```
 
 ### First Build
 
-The first build will take longer (5-15 minutes) as it downloads and compiles all native dependencies. Subsequent builds will be much faster as dependencies are cached.
+The first build will take longer (≈ 5 minutes) as it downloads and compiles all native dependencies. Subsequent builds will be much faster as dependencies are cached.
 
 ```bash
 # Clean build (if needed)

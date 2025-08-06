@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2025-08-06
+
+### Fixed
+
+-   doc.rs build fail
+
+## Updated
+
+-   README.md
+-   minor code refactor
+
 ## [0.1.0] - 2025-08-05
 
 ### Added
