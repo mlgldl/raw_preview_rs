@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2025-08-15
+
+### Added
+
+-   In-memory processing APIs: accept image or RAW data as byte slices and process them without temporary files.
+
+    -   `process_image_bytes(bytes: &[u8], output_path: &str) -> Result<ExifInfo, String>`
+    -   `convert_raw_bytes_to_jpeg(bytes: &[u8], output_path: &str) -> Result<ExifInfo, String>`
+
+-   Vec-returning APIs (return JPEG bytes in-memory):
+    -   `process_image_bytes_to_vec(bytes: &[u8]) -> Result<(Vec<u8>, ExifInfo), String>`
+    -   `convert_raw_bytes_to_vec(bytes: &[u8]) -> Result<(Vec<u8>, ExifInfo), String>`
+
+### Changed
+
+-   README updated to reflect the current public API surface.
+
 ## [0.1.1] - 2025-08-06
 
 ### Fixed

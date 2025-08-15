@@ -47,33 +47,47 @@ jobs:
                       ~/.cargo/registry
                       ~/.cargo/git
                       target
-                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
                   restore-keys: |
                       ${{ runner.os }}-cargo-
+                      ${{ runner.os }}-
 
-                        - name: Build package examples (if any)
-                            run: |
-                                    # Build package examples (no-op if none exist)
-                                    cargo build --manifest-path package/Cargo.toml --examples || true
+            - name: Build and test with SIMD
+              id: test-simd
+              continue-on-error: true
+              run: |
+                  # Run tests with SIMD enabled
+                  cargo test -v --workspace --features simd
+              working-directory: package
 
-                        - name: Build and test
-                            id: test
-                            continue-on-error: true
-                            run: |
-                                    # Run tests (integration test will exercise the 8 cases directly)
-                                    cargo test -v --workspace
+            - name: Build and test without SIMD
+              id: test-no-simd
+              continue-on-error: true
+              run: |
+                  # Run tests with SIMD disabled
+                  cargo test -v --workspace --no-default-features
+              working-directory: package
 
-                        - name: Upload build artifacts on failure
-                            if: steps.test.outcome != 'success'
-                            uses: actions/upload-artifact@v4
-                            with:
-                                    name: build-artifacts
-                                    path: |
-                                        **/target/**
-                                    retention-days: 5
+            - name: Upload build artifacts on failure (SIMD)
+              if: steps.test-simd.outcome != 'success'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: build-artifacts-simd
+                  path: |
+                      **/target/**
+                  retention-days: 5
 
-                        - name: Fail job if tests failed
-                            if: steps.test.outcome != 'success'
-                            run: |
-                                    echo "Tests failed; uploaded examples artifacts for debugging."
-                                    exit 1
+            - name: Upload build artifacts on failure (No SIMD)
+              if: steps.test-no-simd.outcome != 'success'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: build-artifacts-no-simd
+                  path: |
+                      **/target/**
+                  retention-days: 5
+
+            - name: Fail job if tests failed
+              if: steps.test-simd.outcome != 'success' || steps.test-no-simd.outcome != 'success'
+              run: |
+                  echo "Tests failed; uploaded artifacts for debugging."
+                  exit 1
