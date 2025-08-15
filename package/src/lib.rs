@@ -33,6 +33,9 @@ pub use exif_data::ExifInfo;
 pub use file_detector::{get_file_type, is_image_file, is_raw_file, is_supported_file};
 pub use image_processor::process_image_file;
 pub use raw_processor::convert_raw_to_jpeg;
+// Re-export in-memory Vec-returning APIs
+pub use image_processor::process_image_bytes_to_vec;
+pub use raw_processor::convert_raw_bytes_to_vec;
 
 use std::path::Path;
 
@@ -171,6 +174,20 @@ pub fn get_file_info(input_path: &str) -> String {
         "Image" => format!("Standard image file (will be processed with libjpeg_wrapper)"),
         _ => format!("Unsupported file format"),
     }
+}
+
+/// Process image data provided as bytes. Processes the bytes in-memory via the
+/// native FFI and writes the resulting JPEG preview to `output_path`.
+pub fn process_image_bytes(bytes: &[u8], output_path: &str) -> Result<ExifInfo, String> {
+    // Delegate to the in-memory API implemented in `image_processor`
+    image_processor::process_image_bytes(bytes, output_path)
+}
+
+/// Convert RAW bytes to JPEG by processing the bytes in-memory via the native
+/// FFI and writing the resulting JPEG preview to `output_path`.
+pub fn convert_raw_bytes_to_jpeg(bytes: &[u8], output_path: &str) -> Result<ExifInfo, String> {
+    // Delegate to the in-memory API implemented in `raw_processor`
+    raw_processor::convert_raw_bytes_to_jpeg(bytes, output_path)
 }
 
 #[cfg(test)]

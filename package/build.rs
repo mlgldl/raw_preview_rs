@@ -69,11 +69,21 @@ fn main() {
 
     let out_dir = env::var("OUT_DIR").unwrap();
 
+    // Detect SIMD feature for native builds. Default: enabled via Cargo feature.
+    let simd_enabled = detect_simd_enabled();
+    if simd_enabled {
+        println!("cargo:warning=SIMD enabled for native builds");
+        // expose a cfg to rust source if needed
+        println!("cargo:rustc-cfg=raw_preview_rs_simd");
+    } else {
+        println!("cargo:warning=SIMD disabled for native builds");
+    }
+
     // Check for required build tools
     check_build_tools();
 
     // Build all dependencies
-    let paths = build_all_dependencies(&out_dir);
+    let paths = build_all_dependencies(&out_dir, simd_enabled);
 
     // Configure linking
     configure_linking(&paths);
@@ -87,6 +97,14 @@ fn main() {
     println!("cargo:rerun-if-changed=libjpeg_wrapper.cpp");
     println!("cargo:rerun-if-changed=libjpeg_wrapper.h");
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+fn detect_simd_enabled() -> bool {
+    // Cargo feature detection: CARGO_FEATURE_<FEATURE_NAME_UPPER>
+    let feature_on = env::var("CARGO_FEATURE_SIMD").is_ok();
+    // Allow env override to force disable SIMD (e.g., CI or local env)
+    let override_disable = env::var("RAW_PREVIEW_RS_DISABLE_SIMD").is_ok();
+    feature_on && !override_disable
 }
 
 fn check_build_tools() {
@@ -119,7 +137,74 @@ fn check_build_tools() {
     }
 }
 
-fn build_all_dependencies(out_dir: &str) -> BuildPaths {
+// Probe whether the configured compiler accepts a single flag.
+// We try to invoke the compiler (from CXX/CC or fallbacks) to compile a tiny source file
+// with the candidate flag. Returns true if the compiler invocation succeeds.
+fn probe_flag_for_language(flag: &str, is_cxx: bool) -> bool {
+    use std::io::Write;
+    let compiler = if is_cxx {
+        env::var("CXX").unwrap_or_else(|_| String::from("c++"))
+    } else {
+        env::var("CC").unwrap_or_else(|_| String::from("cc"))
+    };
+
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    let tmp = std::env::temp_dir().join(format!("raw_preview_probe_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).ok();
+
+    let src_name = if is_cxx { "probe.cpp" } else { "probe.c" };
+    let src_path = tmp.join(src_name);
+    let mut f = fs::File::create(&src_path).expect("failed to create probe source");
+    let src_contents = if is_cxx {
+        "int main() { return 0; }"
+    } else {
+        "int main() { return 0; }"
+    };
+    f.write_all(src_contents.as_bytes()).ok();
+
+    // Output object path
+    let out_obj = tmp.join("probe.o");
+
+    // Build command depending on MSVC vs others
+    let ok = if target_env == "msvc" {
+        // Try to find cl (or use the configured compiler name). cl accepts flags with / prefix.
+        let mut cmd = Command::new(&compiler);
+        // /nologo suppresses the banner, /c compile only, /Fo sets output file
+        cmd.arg("/nologo")
+            .arg("/c")
+            .arg(src_path.to_str().unwrap())
+            .arg(format!("/Fo{}", out_obj.display()))
+            .arg(flag);
+        match cmd.output() {
+            Ok(output) => output.status.success(),
+            Err(_) => false,
+        }
+    } else {
+        // Generic Unix-like compiler invocation: cc -c src -o out flag
+        let mut cmd = Command::new(&compiler);
+        // Pass the flag directly as provided
+        cmd.arg(flag)
+            .arg("-c")
+            .arg(src_path.to_str().unwrap())
+            .arg("-o")
+            .arg(out_obj.to_str().unwrap());
+        match cmd.output() {
+            Ok(output) => output.status.success(),
+            Err(_) => false,
+        }
+    };
+
+    // Clean up (best effort)
+    let _ = fs::remove_file(&src_path);
+    let _ = fs::remove_file(&out_obj);
+    let _ = fs::remove_dir_all(&tmp);
+
+    ok
+}
+
+fn build_all_dependencies(out_dir: &str, simd_enabled: bool) -> BuildPaths {
     // --- ZLIB ---
     let zlib_dir = Path::new(out_dir).join("zlib");
     let zlib_src_dir = zlib_dir.join("zlib-1.3");
@@ -156,7 +241,7 @@ fn build_all_dependencies(out_dir: &str) -> BuildPaths {
             &libjpeg_dir,
             "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/2.1.5/libjpeg-turbo-2.1.5.tar.gz",
         );
-        build_libjpeg(&libjpeg_src_dir);
+        build_libjpeg(&libjpeg_src_dir, simd_enabled);
     }
 
     // --- TINYEXIF ---
@@ -468,17 +553,60 @@ fn download_and_extract_libjpeg(out_dir: &Path, url: &str) {
         .expect("Failed to extract libjpeg-turbo");
 }
 
-fn build_libjpeg(libjpeg_src_dir: &Path) {
+fn build_libjpeg(libjpeg_src_dir: &Path, simd_enabled: bool) {
     let build_dir = libjpeg_src_dir.join("build");
     fs::create_dir_all(&build_dir).expect("Failed to create build directory for libjpeg-turbo");
-
-    let output = Command::new("cmake")
+    let mut cmake_cmd = Command::new("cmake");
+    cmake_cmd
         .arg("..")
         .arg("-DENABLE_STATIC=1")
         .arg("-DENABLE_SHARED=0")
         .arg("-DWITH_TURBOJPEG=1") // Enable TurboJPEG API
         .arg("-DCMAKE_OSX_ARCHITECTURES=arm64") // Ensure correct architecture
-        .arg("-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0") // Update deployment target to 15.0
+        .arg("-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0"); // Update deployment target to 15.0
+
+    // If SIMD is disabled, instruct CMake/compilers to avoid auto-vectorization
+    if !simd_enabled {
+        println!(
+            "cargo:warning=Configuring libjpeg-turbo build with SIMD disabled (disabling auto-vectorization)"
+        );
+        // Use portable flags to disable auto-vectorization; choose flags per compiler family
+        let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+        if target_env == "msvc" {
+            // For MSVC, prefer /O2 /arch:IA32 but probe that the compiler accepts /arch:IA32.
+            let cflag = "/O2 /arch:IA32";
+            let cxxflag = "/O2 /arch:IA32";
+            if probe_flag_for_language("/arch:IA32", true)
+                && probe_flag_for_language("/arch:IA32", false)
+            {
+                cmake_cmd.arg(format!("-DCMAKE_C_FLAGS={}", cflag));
+                cmake_cmd.arg(format!("-DCMAKE_CXX_FLAGS={}", cxxflag));
+            } else {
+                println!(
+                    "cargo:warning=MSVC compiler does not accept /arch:IA32 probe; falling back to /O2 only"
+                );
+                cmake_cmd.arg("-DCMAKE_C_FLAGS=/O2");
+                cmake_cmd.arg("-DCMAKE_CXX_FLAGS=/O2");
+            }
+        } else {
+            // GCC/Clang: try -fno-tree-vectorize first; if rejected, try -fno-vectorize (clang sometimes supports different flags)
+            if probe_flag_for_language("-fno-tree-vectorize", false) {
+                cmake_cmd.arg("-DCMAKE_C_FLAGS=-O3 -fno-tree-vectorize");
+                cmake_cmd.arg("-DCMAKE_CXX_FLAGS=-O3 -fno-tree-vectorize");
+            } else if probe_flag_for_language("-fno-vectorize", false) {
+                cmake_cmd.arg("-DCMAKE_C_FLAGS=-O3 -fno-vectorize");
+                cmake_cmd.arg("-DCMAKE_CXX_FLAGS=-O3 -fno-vectorize");
+            } else {
+                println!(
+                    "cargo:warning=Could not probe a no-vectorization flag; passing -O2 to be conservative"
+                );
+                cmake_cmd.arg("-DCMAKE_C_FLAGS=-O2");
+                cmake_cmd.arg("-DCMAKE_CXX_FLAGS=-O2");
+            }
+        }
+    }
+
+    let output = cmake_cmd
         .current_dir(&build_dir)
         .output()
         .expect("Failed to configure libjpeg-turbo");

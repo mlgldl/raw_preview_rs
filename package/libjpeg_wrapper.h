@@ -33,7 +33,17 @@ struct ExifData {
 // Returns 0 on success, error code on failure
 int process_image_to_jpeg(const char* input_path, const char* output_path, ExifData& exif_data);
 
+// Process image data from memory (buffer) to JPEG with EXIF extraction
+// `data` points to the input bytes and `size` is the length in bytes.
+// Returns 0 on success, error code on failure
+int process_image_bytes(const unsigned char* data, size_t size, const char* output_path, ExifData& exif_data);
+
 void free_buffer(unsigned char* buffer);
+
+// Process image data from memory and return JPEG bytes in a newly-allocated buffer.
+// The caller receives `*out_buf` (allocated via new unsigned char[]) and `*out_size`.
+// The caller must call `free_buffer` to release the returned buffer.
+int process_image_bytes_to_buffer(const unsigned char* data, size_t size, unsigned char** out_buf, size_t* out_size, ExifData& exif_data);
 
 #ifdef __cplusplus
 }

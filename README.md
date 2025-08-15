@@ -5,10 +5,9 @@
 [![License](https://img.shields.io/crates/l/raw_preview_rs)](https://github.com/mlgldl/raw_preview_rs/blob/master/LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org)
 
-A Rust library designed to quickly create preview JPEGs from RAW image files and extract comprehensive EXIF metadata.\
-‼️ This library is optimized for compatibility; hence, it comes with an involved build process to statically link the C/C++ dependencies, requiring several build tools.
+A Rust library that quickly creates preview JPEGs from RAW image files and extracts EXIF metadata.
 
-This library/crate is in early development.
+This crate statically links several C/C++ dependencies; building it requires native build tools (see below).
 
 ## Features
 
@@ -26,19 +25,12 @@ Add this to your `Cargo.toml`:
 raw_preview_rs = "0.1.1"
 ```
 
-### First Build
-
-The first build will take longer (≈ 5 minutes) as it downloads and compiles all native dependencies. Subsequent builds will be much faster as dependencies are cached.
-
 ```bash
-# Clean build (if needed)
-cargo clean
+# Run package tests
+cargo test -p raw_preview_rs
 
-# Build with full output
-cargo build --release
-
-# Or build and run tests
-cargo test
+# Build the package (release)
+cargo build --manifest-path package/Cargo.toml --release
 ```
 
 ## Usage
@@ -67,6 +59,55 @@ match process_any_image("photo.jpg", "copy.jpg") {
     Ok(exif) => println!("JPEG processed: {}", exif.camera_model),
     Err(e) => eprintln!("JPEG processing failed: {}", e),
 }
+```
+
+### Example: In-memory API (bytes)
+
+The crate now provides APIs that accept image data as bytes (no temporary files required). These are useful when images come from HTTP uploads, in-memory caches, or other non-filesystem sources.
+
+Example: process a JPEG/PNG image provided as bytes:
+
+```rust
+use std::fs;
+use raw_preview_rs::process_image_bytes;
+
+let bytes = fs::read("photo.jpg").expect("read sample");
+let exif = process_image_bytes(&bytes, "preview_out.jpg").expect("process bytes");
+println!("Processed image: {} {}", exif.camera_make, exif.camera_model);
+```
+
+Example: convert RAW bytes (DNG/CR2/etc.) to JPEG:
+
+```rust
+use std::fs;
+use raw_preview_rs::convert_raw_bytes_to_jpeg;
+
+let raw_bytes = fs::read("sample.DNG").expect("read raw sample");
+let exif = convert_raw_bytes_to_jpeg(&raw_bytes, "preview_raw_out.jpg").expect("convert raw bytes");
+println!("RAW processed: {} {}", exif.camera_make, exif.camera_model);
+```
+
+Note: processing using the bytes-based API is performed entirely in-memory via the native FFI and does not create temporary files. The function will still write the resulting JPEG preview to the `output_path` you provide (i.e., you must supply a filesystem path where the preview will be saved).
+
+If you prefer the preview JPEG bytes to be returned directly (instead of writing to disk), the crate exposes Vec-returning helpers at the crate root. Example usage:
+
+```rust
+use std::fs::File;
+use std::io::Write;
+use std::fs;
+use raw_preview_rs::{process_image_bytes_to_vec, convert_raw_bytes_to_vec};
+
+// Image file (JPEG/PNG/etc.) -> get JPEG bytes in-memory
+let img_bytes = fs::read("test_pictures/test_jpeg.jpeg").expect("read sample");
+let (jpeg_bytes, exif) = process_image_bytes_to_vec(&img_bytes).expect("process to vec");
+File::create("preview_from_vec.jpg").unwrap().write_all(&jpeg_bytes).unwrap();
+println!("Processed in-memory: {} {}", exif.camera_make, exif.camera_model);
+
+// RAW file (DNG/CR2/etc.) -> get JPEG bytes in-memory
+let raw_bytes = fs::read("test_pictures/test_raw.ARW").expect("read raw sample");
+let (jpeg_bytes_raw, exif_raw) = convert_raw_bytes_to_vec(&raw_bytes).expect("convert raw to vec");
+File::create("preview_raw_from_vec.jpg").unwrap().write_all(&jpeg_bytes_raw).unwrap();
+println!("RAW in-memory: {} {}", exif_raw.camera_make, exif_raw.camera_model);
 ```
 
 ## Supported Formats
@@ -169,19 +210,6 @@ Alternatively, use **vcpkg** or **Conan** to manage dependencies.
     -   If these are not available, the build script will attempt to use pre-generated configure scripts
     -   Without these tools, some LibRaw versions may fail to build
 
-### Automatic Dependency Management
-
-The following dependencies are automatically downloaded and built during compilation:
-
-1. **zlib 1.3** - Compression library
-2. **LibRaw 0.21.4** - RAW image processing
-3. **libjpeg-turbo 2.1.5** - JPEG compression/decompression
-4. **TinyEXIF 1.0.3** - EXIF metadata extraction
-5. **TinyXML2 11.0.0** - XML parsing for XMP metadata
-6. **stb_image** - Standard image format decoding
-
-All dependencies are statically linked into the final library, so end users don't need to install anything separately.
-
 ### Build Troubleshooting
 
 If you encounter build issues:
@@ -223,6 +251,26 @@ This library automatically manages all its native dependencies through a custom 
 -   **Cross-platform**: Works on macOS, Linux, and Windows with appropriate build tools
 
 No manual dependency installation is required - just ensure you have the build tools listed above.
+
+## Disabling SIMD for libjpeg-turbo builds
+
+By default SIMD optimizations are enabled for native builds. You can disable SIMD specifically for the bundled `libjpeg-turbo` build in two ways:
+
+-   Disable via Cargo features (recommended):
+
+```bash
+# Build without the default "simd" feature
+cargo build --no-default-features
+```
+
+-   Force-disable via environment variable:
+
+```bash
+# Example: disable SIMD for one build
+RAW_PREVIEW_RS_DISABLE_SIMD=1 cargo build
+```
+
+When SIMD is disabled the build script will pass flags to the native build to avoid auto-vectorization (portable across compilers). This helps when building for targets that don't support the host's SIMD instruction set.
 
 ## License
 

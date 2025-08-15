@@ -224,4 +224,250 @@ int process_raw_to_jpeg(const char* input_path, const char* output_path, ExifDat
     }
 }
 
+int process_raw_bytes_to_jpeg(const unsigned char* data, size_t size, const char* output_path, ExifData& exif_data) {
+    (void)exif_data;
+    last_error.clear();
+    if (!data || size == 0) {
+        last_error = "Empty input buffer";
+        return RW_ERROR_OPEN_FILE;
+    }
+
+    LibRaw* processor = new LibRaw();
+    try {
+        processor->imgdata.params.output_bps = 8;
+        processor->imgdata.params.output_color = 1;
+        processor->imgdata.params.use_camera_wb = 1;
+        processor->imgdata.params.no_auto_bright = 1;
+        processor->imgdata.params.use_camera_matrix = 1;
+        processor->imgdata.params.half_size = 1;
+
+        processor->imgdata.rawparams.options = 0;
+        processor->imgdata.rawparams.options |= 0x2000;
+        processor->imgdata.rawparams.options |= 0x8000;
+        processor->imgdata.rawparams.options |= 0x10000;
+        processor->imgdata.rawparams.options |= 0x40000;
+
+    // Use LibRaw's open_buffer API to read from memory
+    int ret = processor->open_buffer(const_cast<unsigned char*>(data), (size_t)size);
+        if (ret != LIBRAW_SUCCESS) {
+            last_error = "Failed to open buffer: ";
+            last_error += libraw_strerror(ret);
+            delete processor;
+            return RW_ERROR_OPEN_FILE;
+        }
+
+        ret = processor->unpack();
+        if (ret != LIBRAW_SUCCESS) {
+            last_error = "Failed to unpack RAW data: ";
+            last_error += libraw_strerror(ret);
+            delete processor;
+            return RW_ERROR_UNPACK;
+        }
+
+        ret = processor->dcraw_process();
+        if (ret != LIBRAW_SUCCESS) {
+            last_error = "Failed to process image: ";
+            last_error += libraw_strerror(ret);
+            delete processor;
+            return RW_ERROR_PROCESS;
+        }
+
+        strncpy((char*)exif_data.camera_make, processor->imgdata.idata.make, 63);
+        ((char*)exif_data.camera_make)[63] = '\0';
+        strncpy((char*)exif_data.camera_model, processor->imgdata.idata.model, 63);
+        ((char*)exif_data.camera_model)[63] = '\0';
+
+        exif_data.software = processor->imgdata.idata.software;
+        exif_data.iso_speed = static_cast<int>(processor->imgdata.other.iso_speed);
+        exif_data.shutter = processor->imgdata.other.shutter;
+        exif_data.aperture = processor->imgdata.other.aperture;
+        exif_data.focal_length = processor->imgdata.other.focal_len;
+        exif_data.raw_width = processor->imgdata.sizes.raw_width;
+        exif_data.raw_height = processor->imgdata.sizes.raw_height;
+        exif_data.output_width = processor->imgdata.sizes.width;
+        exif_data.output_height = processor->imgdata.sizes.height;
+        exif_data.colors = processor->imgdata.idata.colors;
+        exif_data.color_filter = static_cast<int>(processor->imgdata.idata.filters);
+
+        for (int i = 0; i < 4; i++) {
+            exif_data.cam_mul[i] = processor->imgdata.color.cam_mul[i];
+        }
+
+        exif_data.date_taken = processor->imgdata.other.desc;
+        exif_data.lens = processor->imgdata.lens.Lens;
+        exif_data.max_aperture = processor->imgdata.lens.EXIF_MaxAp;
+        exif_data.focal_length_35mm = processor->imgdata.lens.FocalLengthIn35mmFormat;
+        exif_data.description = processor->imgdata.other.desc;
+        exif_data.artist = processor->imgdata.other.artist;
+
+        libraw_processed_image_t* image = processor->dcraw_make_mem_image();
+        if (!image) {
+            last_error = "Failed to generate image data: ";
+            last_error += libraw_strerror(LIBRAW_UNSPECIFIED_ERROR);
+            delete processor;
+            return RW_ERROR_WRITE;
+        }
+
+        if (image->type != LIBRAW_IMAGE_BITMAP || image->colors != 3 || image->bits != 8) {
+            last_error = "Unsupported image format";
+            LibRaw::dcraw_clear_mem(image);
+            delete processor;
+            return RW_ERROR_PROCESS;
+        }
+
+        int width = image->width;
+        int height = image->height;
+        std::vector<unsigned char> ppm_data(image->data, image->data + (width * height * 3));
+        LibRaw::dcraw_clear_mem(image);
+
+        ret = convert_ppm_to_jpeg(ppm_data, width, height, output_path, 75);
+        if (ret != RW_SUCCESS) {
+            last_error = "Failed to convert to JPEG";
+            delete processor;
+            return ret;
+        }
+
+        delete processor;
+        return RW_SUCCESS;
+
+    } catch (const std::exception& e) {
+        last_error = "Exception occurred: ";
+        last_error += e.what();
+        delete processor;
+        return RW_ERROR_UNKNOWN;
+    } catch (...) {
+        last_error = "Unknown exception occurred";
+        delete processor;
+        return RW_ERROR_UNKNOWN;
+    }
+}
+
+int process_raw_bytes_to_jpeg_buffer(const unsigned char* data, size_t size, unsigned char** out_buf, size_t* out_size, ExifData& exif_data) {
+    if (!out_buf || !out_size) return RW_ERROR_UNKNOWN;
+    *out_buf = nullptr;
+    *out_size = 0;
+
+    last_error.clear();
+    if (!data || size == 0) {
+        last_error = "Empty input buffer";
+        return RW_ERROR_OPEN_FILE;
+    }
+
+    LibRaw* processor = new LibRaw();
+    try {
+        processor->imgdata.params.output_bps = 8;
+        processor->imgdata.params.output_color = 1;
+        processor->imgdata.params.use_camera_wb = 1;
+        processor->imgdata.params.no_auto_bright = 1;
+        processor->imgdata.params.use_camera_matrix = 1;
+        processor->imgdata.params.half_size = 1;
+
+        processor->imgdata.rawparams.options = 0;
+        processor->imgdata.rawparams.options |= 0x2000;
+        processor->imgdata.rawparams.options |= 0x8000;
+        processor->imgdata.rawparams.options |= 0x10000;
+        processor->imgdata.rawparams.options |= 0x40000;
+
+        int ret = processor->open_buffer(const_cast<unsigned char*>(data), (size_t)size);
+        if (ret != LIBRAW_SUCCESS) {
+            last_error = "Failed to open buffer: ";
+            last_error += libraw_strerror(ret);
+            delete processor;
+            return RW_ERROR_OPEN_FILE;
+        }
+
+        ret = processor->unpack();
+        if (ret != LIBRAW_SUCCESS) {
+            last_error = "Failed to unpack RAW data: ";
+            last_error += libraw_strerror(ret);
+            delete processor;
+            return RW_ERROR_UNPACK;
+        }
+
+        ret = processor->dcraw_process();
+        if (ret != LIBRAW_SUCCESS) {
+            last_error = "Failed to process image: ";
+            last_error += libraw_strerror(ret);
+            delete processor;
+            return RW_ERROR_PROCESS;
+        }
+
+        strncpy((char*)exif_data.camera_make, processor->imgdata.idata.make, 63);
+        ((char*)exif_data.camera_make)[63] = '\0';
+        strncpy((char*)exif_data.camera_model, processor->imgdata.idata.model, 63);
+        ((char*)exif_data.camera_model)[63] = '\0';
+
+        exif_data.software = processor->imgdata.idata.software;
+        exif_data.iso_speed = static_cast<int>(processor->imgdata.other.iso_speed);
+        exif_data.shutter = processor->imgdata.other.shutter;
+        exif_data.aperture = processor->imgdata.other.aperture;
+        exif_data.focal_length = processor->imgdata.other.focal_len;
+        exif_data.raw_width = processor->imgdata.sizes.raw_width;
+        exif_data.raw_height = processor->imgdata.sizes.raw_height;
+        exif_data.output_width = processor->imgdata.sizes.width;
+        exif_data.output_height = processor->imgdata.sizes.height;
+        exif_data.colors = processor->imgdata.idata.colors;
+        exif_data.color_filter = static_cast<int>(processor->imgdata.idata.filters);
+
+        for (int i = 0; i < 4; i++) exif_data.cam_mul[i] = processor->imgdata.color.cam_mul[i];
+
+        exif_data.date_taken = processor->imgdata.other.desc;
+        exif_data.lens = processor->imgdata.lens.Lens;
+        exif_data.max_aperture = processor->imgdata.lens.EXIF_MaxAp;
+        exif_data.focal_length_35mm = processor->imgdata.lens.FocalLengthIn35mmFormat;
+        exif_data.description = processor->imgdata.other.desc;
+        exif_data.artist = processor->imgdata.other.artist;
+
+        libraw_processed_image_t* image = processor->dcraw_make_mem_image();
+        if (!image) {
+            last_error = "Failed to generate image data: ";
+            last_error += libraw_strerror(LIBRAW_UNSPECIFIED_ERROR);
+            delete processor;
+            return RW_ERROR_WRITE;
+        }
+
+        if (image->type != LIBRAW_IMAGE_BITMAP || image->colors != 3 || image->bits != 8) {
+            last_error = "Unsupported image format";
+            LibRaw::dcraw_clear_mem(image);
+            delete processor;
+            return RW_ERROR_PROCESS;
+        }
+
+        int width = image->width;
+        int height = image->height;
+        std::vector<unsigned char> ppm_data(image->data, image->data + (width * height * 3));
+        LibRaw::dcraw_clear_mem(image);
+
+        // Compress to JPEG in memory using TurboJPEG
+        tjhandle jpeg_compressor = tjInitCompress();
+        if (!jpeg_compressor) { delete processor; return RW_ERROR_PROCESS; }
+
+        unsigned char* jpeg_buf = nullptr;
+        unsigned long jpeg_size = 0;
+        int cres = tjCompress2(jpeg_compressor, ppm_data.data(), width, 0, height, TJPF_RGB, &jpeg_buf, &jpeg_size, TJSAMP_444, 75, TJFLAG_FASTDCT);
+        if (cres != 0) { tjDestroy(jpeg_compressor); delete processor; return RW_ERROR_PROCESS; }
+
+        // Copy to caller buffer
+        unsigned char* out = new unsigned char[jpeg_size];
+        memcpy(out, jpeg_buf, jpeg_size);
+        *out_buf = out;
+        *out_size = jpeg_size;
+
+        tjFree(jpeg_buf);
+        tjDestroy(jpeg_compressor);
+        delete processor;
+        return RW_SUCCESS;
+
+    } catch (const std::exception& e) {
+        last_error = "Exception occurred: ";
+        last_error += e.what();
+        delete processor;
+        return RW_ERROR_UNKNOWN;
+    } catch (...) {
+        last_error = "Unknown exception occurred";
+        delete processor;
+        return RW_ERROR_UNKNOWN;
+    }
+}
+
 } // extern "C"

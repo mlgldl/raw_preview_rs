@@ -43,6 +43,14 @@ struct ExifData {
 // Returns 0 on success, error code on failure
 int process_raw_to_jpeg(const char* input_path, const char* output_path, ExifData& exif_data);
 
+// Process RAW data from an in-memory buffer and convert it to JPEG
+// Returns 0 on success, error code on failure
+int process_raw_bytes_to_jpeg(const unsigned char* data, size_t size, const char* output_path, ExifData& exif_data);
+
+// Process RAW data from memory and return JPEG bytes in a newly-allocated buffer.
+// Caller receives *out_buf (allocated via new unsigned char[]) and *out_size and must call get_last_error()/free_buffer as needed.
+int process_raw_bytes_to_jpeg_buffer(const unsigned char* data, size_t size, unsigned char** out_buf, size_t* out_size, ExifData& exif_data);
+
 // Convert PPM data in memory to JPEG
 // quality ranges from 1 to 100, with 100 being the best quality
 int convert_ppm_to_jpeg(const std::vector<unsigned char>& ppm_data, int width, int height, const char* jpeg_path, int quality);
